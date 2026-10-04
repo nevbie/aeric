@@ -1,0 +1,22 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Platform folders are generated in CI by `flutter create` + tool/patch_platforms.py
+/android/
+/ios/
+/web/
+/linux/
+/macos/
+/windows/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
