@@ -30,6 +30,27 @@ estimates.
     today): median climb, share of days with usable thermals, mean temperature, cloud cover,
     mean wind speed with prevailing direction, and median thermal top.
 
+- **Flight** (v0.2): in-flight instruments.
+  - **Vario**: phone barometer with a Kalman filter (GPS altitude if there is no barometer),
+    calibrated on the launch height. Audio beeps get higher and faster with lift; a low tone
+    sounds in strong sink.
+  - Altitude, height above ground (Copernicus DEM via Open-Meteo), ground speed and track.
+  - **Wind from drift while circling**, 30 s average climb, and the thermal average and gain.
+  - **Glide**: current L/D, plus final glide to the nearest known landing field (needed L/D and
+    arrival height including wind and a 150 m margin).
+  - Voice callouts when leaving a thermal. Recording runs in the background (Android foreground
+    service, iOS background location and audio) and auto-saves after landing.
+- **Logbook** (v0.2):
+  - recorded flights, plus **IGC import** (single files or the ZIP from XContest → My flights →
+    Download: IGC)
+  - statistics, thermals found in each flight, replay through the instruments (10×), and export as
+    IGC or KML for Google Earth
+  - every thermal is tagged with the weather of its hour (wind, cloud cover, temperature from
+    ERA5), so the map can show **My thermals like today**: thermals you found in weather similar to
+    the forecast (wind direction ±45°, wind speed ±10 km/h, cloud cover ±35 %)
+- The kk7 **Hotspots/Skyways** layers follow the season and time of day (kk7 `jan/apr/jul/oct` ×
+  morning/midday/evening after sunrise) instead of the whole year.
+
 ## How thermals are inferred
 
 Historical hours (Open-Meteo ERA5 archive) and today's hours (Open-Meteo forecast, including the

@@ -1,0 +1,358 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+
+import '../core/elevation.dart';
+import '../core/flight/fix.dart';
+import '../core/flight/flight_analysis.dart';
+import '../core/flight/geo.dart';
+import '../core/flight/glide.dart';
+import '../core/flight/igc.dart';
+import '../core/flight/vario.dart';
+import '../core/flight/wind.dart';
+import '../core/site.dart';
+import 'app_state.dart';
+import 'logbook.dart';
+import 'vario_audio.dart';
+
+enum FlightMode { idle, live, replay }
+
+/// Everything the instrument screen shows, fed by GPS + barometer (live) or an IGC file (replay).
+class FlightController extends ChangeNotifier {
+  FlightController._();
+  static final instance = FlightController._();
+
+  final audio = VarioAudio();
+  late final _tts = FlutterTts(); // lazy: only created when something is spoken
+  bool voice = true;
+
+  FlightMode mode = FlightMode.idle;
+  String? error;
+
+  // Live values.
+  Fix? fix;
+  double groundSpeedKmh = 0;
+  double? trackDeg;
+  double varioMs = 0;
+  double? avg30Ms;
+  double? baroAltM;
+  double? terrainM;
+  WindEstimate? wind;
+  double? glideRatio;
+  FinalGlide? finalGlideToLanding;
+  Site? landingSite;
+  bool hasBarometer = false;
+  bool flying = false;
+  DateTime? takeoffTime;
+
+  /// Climb since circling started (thermal average) and its gain.
+  double? thermalAvgMs;
+  double? thermalGainM;
+
+  double? get aglM => fix == null || terrainM == null ? null : fix!.altM - terrainM!;
+
+  /// Recorded fixes of the current flight (1 Hz).
+  final List<Fix> track = [];
+
+  final _kalman = KalmanVario();
+
+  /// GPS altitude is far noisier (±3–5 m) than a barometer, so the fallback filters harder.
+  final _gpsKalman = KalmanVario(accelNoise: 0.4, altNoiseM: 4);
+  final _avg = TimeAverage(const Duration(seconds: 30));
+  double? _qnh;
+  final List<(DateTime, double)> _qnhSamples = [];
+  StreamSubscription<Position>? _gpsSub;
+  StreamSubscription<BarometerEvent>? _baroSub;
+  Timer? _replayTimer;
+  DateTime? _lastElevationAt;
+  DateTime? _groundSince;
+  int _circlingFixes = 0;
+  Fix? _thermalStart;
+
+  ElevationClient get _elevation => AppState.instance.elevation;
+
+  void toggleMute() {
+    audio.muted = !audio.muted;
+    notifyListeners();
+  }
+
+  void toggleVoice() {
+    voice = !voice;
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------------ live
+  Future<void> startLive() async {
+    if (mode != FlightMode.idle) return;
+    error = null;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) throw 'Location services are off';
+      var p = await Geolocator.checkPermission();
+      if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
+      if (p == LocationPermission.denied || p == LocationPermission.deniedForever) throw 'Location permission denied';
+    } catch (e) {
+      error = '$e';
+      notifyListeners();
+      return;
+    }
+    reset();
+    mode = FlightMode.live;
+    notifyListeners();
+    WakelockPlus.enable().ignore();
+
+    final LocationSettings settings = Platform.isAndroid
+        ? AndroidSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            intervalDuration: const Duration(seconds: 1),
+            foregroundNotificationConfig: const ForegroundNotificationConfig(
+              notificationTitle: 'aeric is recording your flight',
+              notificationText: 'Vario and GPS keep running with the screen off.',
+              enableWakeLock: true,
+            ),
+          )
+        : AppleSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            activityType: ActivityType.airborne,
+            pauseLocationUpdatesAutomatically: false,
+            allowBackgroundLocationUpdates: true,
+            showBackgroundLocationIndicator: true,
+          );
+    _gpsSub = Geolocator.getPositionStream(locationSettings: settings).listen(
+      (p) => onPosition(
+        Fix(time: DateTime.now().toUtc(), lat: p.latitude, lon: p.longitude, gpsAltM: p.altitude, baroAltM: baroAltM),
+        speedKmh: p.speed >= 0 ? p.speed * 3.6 : null,
+      ),
+      onError: (Object e) {
+        error = 'GPS: $e';
+        notifyListeners();
+      },
+    );
+    _baroSub = barometerEventStream(samplingPeriod: SensorInterval.gameInterval).listen(
+      (e) => onPressure(DateTime.now().toUtc(), e.pressure),
+      onError: (Object _) => hasBarometer = false, // fall back to a GPS-altitude vario
+      cancelOnError: true,
+    );
+    await audio.start(() => varioMs);
+  }
+
+  Future<void> stop() async {
+    await _gpsSub?.cancel();
+    await _baroSub?.cancel();
+    _gpsSub = null;
+    _baroSub = null;
+    _replayTimer?.cancel();
+    _replayTimer = null;
+    await audio.stop();
+    WakelockPlus.disable().ignore();
+    final wasLive = mode == FlightMode.live;
+    mode = FlightMode.idle;
+    notifyListeners();
+    if (wasLive && track.length > 30) {
+      await Logbook.instance.addIgc(writeIgc(track), source: 'recorded');
+    }
+  }
+
+  // ------------------------------------------------------------------ replay
+  /// Plays an IGC file through the same pipeline (vario, wind, glide, sound) at [speed]x.
+  Future<void> startReplay(IgcFlight flight, {int speed = 10}) async {
+    if (mode != FlightMode.idle || flight.fixes.isEmpty) return;
+    reset();
+    mode = FlightMode.replay;
+    notifyListeners();
+    await audio.start(() => varioMs);
+    var i = 0;
+    final fixes = flight.fixes;
+    final start = DateTime.now();
+    final t0 = fixes.first.time;
+    _replayTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      final simNow = t0.add(DateTime.now().difference(start) * speed);
+      while (i < fixes.length && !fixes[i].time.isAfter(simNow)) {
+        final f = fixes[i];
+        // Feed the altitude as pressure so the barometer path is exercised too.
+        onPressure(f.time, 1013.25 * math.pow(1 - f.altM / 44330.77, 1 / 0.190263));
+        onPosition(f);
+        i++;
+      }
+      if (i >= fixes.length) stop();
+    });
+  }
+
+  // ------------------------------------------------------------------ pipeline
+  void reset() {
+    _kalman.reset();
+    _gpsKalman.reset();
+    _avg.clear();
+    _qnh = null;
+    _qnhSamples.clear();
+    track.clear();
+    fix = null;
+    wind = null;
+    glideRatio = null;
+    finalGlideToLanding = null;
+    terrainM = null;
+    varioMs = 0;
+    avg30Ms = null;
+    flying = false;
+    takeoffTime = null;
+    hasBarometer = false;
+    _groundSince = null;
+    _circlingFixes = 0;
+    _thermalStart = null;
+    thermalAvgMs = null;
+    thermalGainM = null;
+  }
+
+  /// Barometer sample. Altitude is calibrated (QNH) against the first GPS fixes.
+  void onPressure(DateTime t, double hPa) {
+    hasBarometer = true;
+    if (_qnh == null) {
+      _qnhSamples.add((t, hPa));
+      return;
+    }
+    baroAltM = pressureToAltitudeM(hPa, qnhHpa: _qnh!);
+    varioMs = _kalman.update(t, baroAltM!);
+  }
+
+  void onPosition(Fix raw, {double? speedKmh}) {
+    // Calibrate the barometer once GPS altitude has settled (10 fixes), or right away in replay.
+    if (_qnh == null && hasBarometer && _qnhSamples.isNotEmpty && (track.length >= 10 || mode == FlightMode.replay)) {
+      final p = _qnhSamples.last.$2;
+      _qnh = mode == FlightMode.replay ? 1013.25 : qnhFor(p, _calibrationAltitude(raw));
+      _qnhSamples.clear();
+    }
+    final f = Fix(time: raw.time, lat: raw.lat, lon: raw.lon, gpsAltM: raw.gpsAltM, baroAltM: hasBarometer ? baroAltM : null);
+    final prev = fix;
+    fix = f;
+    if (!hasBarometer) varioMs = _gpsKalman.update(f.time, f.gpsAltM); // GPS-only fallback
+    _avg.add(f.time, varioMs);
+    avg30Ms = _avg.value;
+    if (prev != null) {
+      groundSpeedKmh = speedKmh ?? FlightAnalyzer.speedKmh(prev, f);
+      if (distanceM(prev.lat, prev.lon, f.lat, f.lon) > 1) trackDeg = bearingDeg(prev.lat, prev.lon, f.lat, f.lon);
+    }
+    if (track.isEmpty || f.time.difference(track.last.time).inMilliseconds >= 900) track.add(f);
+
+    _updateFlying(f);
+    _updateThermal(f);
+    _updateWindAndGlide(f);
+    _updateTerrain(f);
+    notifyListeners();
+  }
+
+  /// Takeoff height if we're on a known launch, otherwise GPS.
+  double _calibrationAltitude(Fix f) {
+    for (final s in AppState.instance.sites) {
+      if (distanceM(s.lat, s.lon, f.lat, f.lon) < 150) return s.takeoffElevationM;
+    }
+    return f.gpsAltM;
+  }
+
+  void _updateFlying(Fix f) {
+    // Takeoff: moving faster than walking for the last 15 s.
+    if (!flying && groundSpeedKmh > 15 && track.length > 15) {
+      final recent = track.sublist(track.length - 15);
+      if (FlightAnalyzer.speedKmh(recent.first, recent.last) > 12) {
+        flying = true;
+        takeoffTime = f.time;
+      }
+    }
+    if (flying) {
+      if (groundSpeedKmh < 3) {
+        _groundSince ??= f.time;
+        if (f.time.difference(_groundSince!).inSeconds > 90 && mode == FlightMode.live) {
+          flying = false;
+          _say('Landed. Flight saved.');
+          stop();
+        }
+      } else {
+        _groundSince = null;
+      }
+    }
+  }
+
+  void _updateThermal(Fix f) {
+    final recent = _since(f.time, 30);
+    var turned = 0.0;
+    for (var i = 2; i < recent.length; i++) {
+      final a = recent[i - 2], b = recent[i - 1], c = recent[i];
+      if (distanceM(a.lat, a.lon, b.lat, b.lon) < 1 || distanceM(b.lat, b.lon, c.lat, c.lon) < 1) continue;
+      turned += turnDeg(bearingDeg(a.lat, a.lon, b.lat, b.lon), bearingDeg(b.lat, b.lon, c.lat, c.lon));
+    }
+    final circling = turned.abs() >= 300;
+    if (circling) {
+      _circlingFixes++;
+      _thermalStart ??= recent.first;
+      final dt = f.time.difference(_thermalStart!.time).inSeconds;
+      thermalGainM = f.altM - _thermalStart!.altM;
+      thermalAvgMs = dt > 0 ? thermalGainM! / dt : null;
+    } else if (_thermalStart != null && _circlingFixes > 0) {
+      if ((thermalGainM ?? 0) > 50 && thermalAvgMs != null) {
+        _say('Thermal average ${thermalAvgMs!.toStringAsFixed(1)}, gained ${thermalGainM!.round()} metres');
+      }
+      _thermalStart = null;
+      _circlingFixes = 0;
+    }
+  }
+
+  void _updateWindAndGlide(Fix f) {
+    if (track.length % 5 == 0) {
+      final w = windFromCircling(_since(f.time, 45));
+      if (w != null && w.quality > 0.8) wind = w;
+      glideRatio = currentGlideRatio(_since(f.time, 30));
+    }
+    // Final glide to the nearest known landing field.
+    Site? best;
+    var bestD = double.infinity;
+    for (final s in AppState.instance.sites) {
+      if (s.landingLat == null) continue;
+      final d = distanceM(f.lat, f.lon, s.landingLat!, s.landingLon!);
+      if (d < bestD) {
+        bestD = d;
+        best = s;
+      }
+    }
+    landingSite = bestD < 40000 ? best : null;
+    finalGlideToLanding = landingSite == null
+        ? null
+        : finalGlide(
+            lat: f.lat, lon: f.lon, altM: f.altM,
+            goalLat: landingSite!.landingLat!, goalLon: landingSite!.landingLon!,
+            goalElevationM: landingSite!.landingElevationM ?? 0,
+            windFromDeg: wind?.fromDeg ?? 0, windKmh: wind?.speedKmh ?? 0,
+          );
+  }
+
+  void _updateTerrain(Fix f) {
+    final cached = _elevation.cached(f.lat, f.lon);
+    if (cached != null) {
+      terrainM = cached;
+      return;
+    }
+    final last = _lastElevationAt;
+    if (last != null && f.time.difference(last).inSeconds < 10) return;
+    _lastElevationAt = f.time;
+    _elevation.elevation(f.lat, f.lon).then((e) {
+      terrainM = e;
+      notifyListeners();
+    }).catchError((Object _) {});
+  }
+
+  List<Fix> _since(DateTime t, int seconds) {
+    var i = track.length;
+    while (i > 0 && t.difference(track[i - 1].time).inSeconds <= seconds) {
+      i--;
+    }
+    return track.sublist(i);
+  }
+
+  void _say(String text) {
+    if (!voice || mode == FlightMode.idle) return;
+    _tts.speak(text).catchError((Object _) => 0);
+  }
+}

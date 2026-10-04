@@ -113,4 +113,43 @@ void main() {
     expect(find.textContaining('thermal.kk7.ch'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('screens refresh when forecasts arrive after start-up', (tester) async {
+    final app = AppState.instance;
+    await app.loadFavourites();
+    app.forecasts.clear();
+    app.setTab(0); // the singleton keeps the tab of earlier tests
+    await tester.binding.setSurfaceSize(const Size(420, 2400));
+    await tester.pumpWidget(const AericApp());
+    await tester.pump();
+    final site = app.siteById('loffenau-west');
+    expect(find.text(site.name), findsNothing);
+
+    final now = app.siteNow(site);
+    app.forecasts[site.id] = sunnyDay(DateTime(now.year, now.month, now.day));
+    app.setTab(0); // any notification, like the end of refreshForecasts()
+    await tester.pump();
+    expect(find.text(site.name), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Flight and Logbook tabs render at phone size', (tester) async {
+    final app = AppState.instance;
+    await app.loadFavourites();
+    app.setTab(0);
+    await tester.binding.setSurfaceSize(const Size(360, 800));
+    await tester.pumpWidget(const AericApp());
+    await tester.pump();
+
+    await tester.tap(find.text('Flight'));
+    await tester.pump();
+    expect(find.text('Vario'), findsOneWidget);
+    expect(find.text('Start flight'), findsOneWidget);
+    expect(find.text('Needed L/D'), findsOneWidget);
+
+    await tester.tap(find.text('Logbook'));
+    await tester.pump();
+    expect(find.text('Import IGC'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

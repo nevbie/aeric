@@ -35,32 +35,32 @@ const blackForestSites = [
   ),
   Site(
     id: 'hornisgrinde', name: 'Hornisgrinde Katzenkopf', lat: 48.5969, lon: 8.1962,
-    takeoffElevationM: 1123, landingElevationM: 463,
+    takeoffElevationM: 1123, landingElevationM: 463, landingLat: 48.5901, landingLon: 8.1633,
     sectors: [WindSector(230, 280)], maxWindKmh: 10,
     notes: 'Seebach. DHV: wind 230–280°, max. 10 km/h. Briefing, B licence and day membership required. '
         'Long glide over forest with hardly any emergency landing options.',
   ),
   Site(
     id: 'oppenau-rossbuehl', name: 'Oppenau Rossbühl (SW–W)', lat: 48.4870, lon: 8.2391,
-    takeoffElevationM: 930, landingElevationM: 500,
+    takeoffElevationM: 930, landingElevationM: 500, landingLat: 48.4797, landingLon: 8.2214,
     sectors: [WindSector(202.5, 292.5)], maxWindKmh: 20,
     notes: '$_oppenau Spacious launch with top-landing; landing Nockenbauernhof.',
   ),
   Site(
     id: 'oppenau-sandkopf', name: 'Oppenau Sandkopf (S)', lat: 48.4965, lon: 8.2328,
-    takeoffElevationM: 930, landingElevationM: 500,
+    takeoffElevationM: 930, landingElevationM: 500, landingLat: 48.4797, landingLon: 8.2214,
     sectors: [WindSector(157.5, 202.5)], maxWindKmh: 20,
     notes: '$_oppenau Access on foot; landing Nockenbauernhof.',
   ),
   Site(
     id: 'oppenau-schaefersfeld', name: 'Oppenau Schäfersfeld (E–SE)', lat: 48.4357, lon: 8.1520,
-    takeoffElevationM: 770, landingElevationM: 305,
+    takeoffElevationM: 770, landingElevationM: 305, landingLat: 48.4512, landingLon: 8.1654,
     sectors: [WindSector(67.5, 157.5)], maxWindKmh: 20,
     notes: '$_oppenau Landing Bruhansenhof.',
   ),
   Site(
     id: 'oppenau-ibach', name: 'Oppenau Ibacher Holzplatz (NE)', lat: 48.4475, lon: 8.1460,
-    takeoffElevationM: 740, landingElevationM: 305,
+    takeoffElevationM: 740, landingElevationM: 305, landingLat: 48.4512, landingLon: 8.1654,
     sectors: [WindSector(22.5, 67.5)], maxWindKmh: 20,
     notes: '$_oppenau Bird protection area: fly only from 2 h after sunrise to 1 h before sunset. Landing Bruhansenhof.',
   ),

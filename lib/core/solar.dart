@@ -29,3 +29,16 @@ double cloudyRadiation(double clearSky, double cloudCoverPct) {
   final n = (cloudCoverPct / 100).clamp(0.0, 1.0);
   return clearSky * (1 - 0.75 * math.pow(n, 3.4));
 }
+
+/// Local sunrise (hours after local midnight) for a date, or null during polar night/day.
+/// Scans in 2-minute steps for the sun crossing −0.833° (refraction + sun radius).
+double? sunriseHourLocal(double lat, double lon, DateTime localDate, int utcOffsetSeconds) {
+  final midnightUtc = DateTime.utc(localDate.year, localDate.month, localDate.day).subtract(Duration(seconds: utcOffsetSeconds));
+  var prev = sunElevationDeg(lat, lon, midnightUtc);
+  for (var m = 2; m <= 14 * 60; m += 2) {
+    final e = sunElevationDeg(lat, lon, midnightUtc.add(Duration(minutes: m)));
+    if (prev < -0.833 && e >= -0.833) return m / 60;
+    prev = e;
+  }
+  return null;
+}
