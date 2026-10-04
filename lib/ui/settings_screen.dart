@@ -1,5 +1,7 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../services/airspace_store.dart';
 import '../services/app_state.dart';
 import '../services/settings.dart';
 
@@ -16,12 +18,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _pilot = TextEditingController(text: st.pilot);
   late final _glider = TextEditingController(text: st.glider);
   late final _qnh = TextEditingController(text: st.qnhHpa?.toStringAsFixed(1) ?? '');
+  final _airUrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    AirspaceStore.instance.load();
+  }
+
+  Future<void> _importAirspace() async {
+    final picked = await FilePicker.pickFiles();
+    if (picked.isEmpty) return;
+    final f = picked.first;
+    await AirspaceStore.instance.importBytes(await f.xFile.readAsBytes(), from: f.name);
+  }
 
   @override
   void dispose() {
     _pilot.dispose();
     _glider.dispose();
     _qnh.dispose();
+    _airUrl.dispose();
     super.dispose();
   }
 
@@ -45,7 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListenableBuilder(
-        listenable: Listenable.merge([st, app]),
+        listenable: Listenable.merge([st, app, AirspaceStore.instance]),
         builder: (context, _) => ListView(children: [
           const _Header('Pilot (written into recorded IGC files)'),
           Padding(
@@ -93,6 +110,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 st.update((s) => s.qnhHpa = q != null && q > 900 && q < 1100 ? q : null);
               },
             ),
+          ),
+          const _Header('Airspace (OpenAIR)'),
+          ListTile(
+            title: Text(AirspaceStore.instance.airspaces.isEmpty
+                ? 'No airspace loaded'
+                : '${AirspaceStore.instance.airspaces.length} airspaces from ${AirspaceStore.instance.source}'),
+            subtitle: const Text('Warnings for CTR, restricted, prohibited, danger areas and classes A–D, TMZ/RMZ. '
+                'Get a current file from your national association or openAIP (keep it up to date!).'),
+          ),
+          if (AirspaceStore.instance.error case final e?)
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(e, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(spacing: 8, children: [
+              FilledButton.tonalIcon(onPressed: _importAirspace, icon: const Icon(Icons.file_open), label: const Text('Import file')),
+              if (AirspaceStore.instance.airspaces.isNotEmpty)
+                TextButton(onPressed: AirspaceStore.instance.clear, child: const Text('Remove')),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(children: [
+              Expanded(child: TextField(controller: _airUrl, decoration: const InputDecoration(labelText: 'or load from URL'))),
+              IconButton(
+                icon: const Icon(Icons.download),
+                onPressed: () => AirspaceStore.instance.download(_airUrl.text),
+              ),
+            ]),
           ),
           const _Header('Own takeoffs and landings (long-press the map to add)'),
           for (final s in app.sites.where((s) => s.userDefined))

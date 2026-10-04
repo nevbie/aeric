@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'services/airspace_store.dart';
 import 'services/app_state.dart';
 import 'services/logbook.dart';
 import 'services/settings.dart';
@@ -15,6 +16,7 @@ void main() {
   Settings.instance.load();
   AppState.instance.loadFavourites();
   Logbook.instance.load();
+  AirspaceStore.instance.load();
   runApp(const AericApp());
   AppState.instance.refreshForecasts();
 }

@@ -81,3 +81,11 @@ class FavouriteButton extends StatelessWidget {
     );
   }
 }
+
+/// Map colour of an airspace class: red for no-go (CTR, restricted, prohibited, C, D),
+/// orange for danger areas, blue for the rest.
+Color airspaceColor(String cls) => switch (cls) {
+      'CTR' || 'R' || 'P' || 'A' || 'B' || 'C' || 'D' => noGoColor,
+      'Q' || 'DANGER' => const Color(0xFFEF6C00),
+      _ => const Color(0xFF0288D1),
+    };

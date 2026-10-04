@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../core/airspace.dart';
 import '../core/geo.dart';
 import '../services/flight_controller.dart';
 import '../services/settings.dart';
@@ -22,6 +23,7 @@ class FlightScreen extends StatelessWidget {
         final fg = fc.finalGlideToLanding;
         final w = fc.wind;
         return Column(children: [
+          if (fc.airspaceWarnings.isNotEmpty) _AirspaceBanner(fc.airspaceWarnings),
           _VarioPanel(fc.varioMs, fc.avg30Ms, fc.thermalAvgMs, fc.thermalGainM),
           Expanded(
             child: GridView.count(
@@ -106,6 +108,39 @@ class FlightScreen extends StatelessWidget {
             ),
         ]);
       },
+    );
+  }
+}
+
+class _AirspaceBanner extends StatelessWidget {
+  const _AirspaceBanner(this.warnings);
+  final List<AirspaceWarning> warnings;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = warnings.first;
+    final color = switch (w.level) {
+      AirspaceLevel.inside => noGoColor,
+      AirspaceLevel.warning => marginalColor,
+      AirspaceLevel.info => Colors.blueGrey,
+    };
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(6, 6, 6, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        const Icon(Icons.warning_amber_rounded, color: Colors.white),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            w.text + (warnings.length > 1 ? '  (+${warnings.length - 1})' : ''),
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ]),
     );
   }
 }

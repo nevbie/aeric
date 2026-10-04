@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../core/airspace.dart';
 import '../core/elevation.dart';
 import '../core/flight/fix.dart';
 import '../core/flight/flight_analysis.dart';
@@ -17,6 +18,7 @@ import '../core/flight/igc.dart';
 import '../core/flight/vario.dart';
 import '../core/flight/wind.dart';
 import '../core/landing.dart';
+import 'airspace_store.dart';
 import 'app_state.dart';
 import 'logbook.dart';
 import 'settings.dart';
@@ -51,6 +53,11 @@ class FlightController extends ChangeNotifier {
   bool hasBarometer = false;
   bool flying = false;
   DateTime? takeoffTime;
+
+  /// Airspaces we are in, about to enter or close to (most urgent first).
+  List<AirspaceWarning> airspaceWarnings = const [];
+  final _announced = <String, DateTime>{};
+  static const _airspaceChecker = AirspaceChecker();
 
   /// Climb since circling started (thermal average) and its gain.
   double? thermalAvgMs;
@@ -215,6 +222,8 @@ class FlightController extends ChangeNotifier {
     _thermalStart = null;
     thermalAvgMs = null;
     thermalGainM = null;
+    airspaceWarnings = const [];
+    _announced.clear();
   }
 
   /// Barometer sample. Altitude is calibrated (QNH) against the first GPS fixes.
@@ -251,7 +260,35 @@ class FlightController extends ChangeNotifier {
     _updateThermal(f);
     _updateWindAndGlide(f);
     _updateTerrain(f);
+    _updateAirspace(f);
     notifyListeners();
+  }
+
+  void _updateAirspace(Fix f) {
+    final spaces = AirspaceStore.instance.airspaces;
+    if (spaces.isEmpty) {
+      airspaceWarnings = const [];
+      return;
+    }
+    airspaceWarnings = _airspaceChecker.check(
+      spaces,
+      lat: f.lat,
+      lon: f.lon,
+      altM: f.altM,
+      groundM: terrainM ?? 0,
+      qnhHpa: _qnh ?? Settings.instance.qnhHpa ?? 1013.25,
+      trackDeg: trackDeg,
+      groundSpeedKmh: groundSpeedKmh,
+    );
+    // Speak each urgent airspace at most once a minute.
+    for (final w in airspaceWarnings) {
+      if (w.level != AirspaceLevel.inside) continue;
+      final key = '${w.airspace.cls} ${w.airspace.name}';
+      final last = _announced[key];
+      if (last != null && f.time.difference(last).inSeconds < 60) continue;
+      _announced[key] = f.time;
+      _say(w.predicted ? 'Airspace ahead: ${w.airspace.name}' : 'Inside airspace ${w.airspace.name}');
+    }
   }
 
   /// Takeoff height if we're on a known launch, otherwise GPS.

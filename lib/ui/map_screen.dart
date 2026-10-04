@@ -11,6 +11,7 @@ import '../core/thermal_grid.dart';
 import '../core/solar.dart';
 import '../core/thermal_model.dart';
 import '../services/app_state.dart';
+import '../services/airspace_store.dart';
 import '../services/logbook.dart';
 import 'common.dart';
 import 'place_editor.dart';
@@ -54,6 +55,7 @@ class _MapScreenState extends State<MapScreen> {
   /// Thermals from the logbook; [matchToday] highlights those flown in conditions like the
   /// forecast for the selected day/hour.
   bool showMine = true;
+  bool showAirspace = true;
   bool matchToday = true;
   bool _requested = false;
 
@@ -61,6 +63,7 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     Logbook.instance.load();
+    AirspaceStore.instance.load();
   }
 
   DateTime get _when => hour == 0
@@ -188,7 +191,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([AppState.instance, Logbook.instance]),
+        listenable: Listenable.merge([AppState.instance, Logbook.instance, AirspaceStore.instance]),
         builder: (context, _) => _build(context),
       );
 
@@ -218,6 +221,16 @@ class _MapScreenState extends State<MapScreen> {
               opacity: 0.8,
               child: TileLayer(urlTemplate: kk7Tiles(_kk7('thermals')), tms: true, maxNativeZoom: 12, userAgentPackageName: 'com.nevbie.aeric'),
             ),
+          if (showAirspace && AirspaceStore.instance.airspaces.isNotEmpty)
+            PolygonLayer(polygons: [
+              for (final a in AirspaceStore.instance.airspaces)
+                Polygon(
+                  points: [for (final (la, lo) in a.polygon) LatLng(la, lo)],
+                  color: airspaceColor(a.cls).withValues(alpha: 0.08),
+                  borderColor: airspaceColor(a.cls),
+                  borderStrokeWidth: 1.2,
+                ),
+            ]),
           if (showMine && Logbook.instance.entries.isNotEmpty)
             Builder(builder: (context) {
               final ref = matchToday ? _referenceCondition()?.$1 : null;
@@ -296,6 +309,16 @@ class _MapScreenState extends State<MapScreen> {
               tooltip: 'Thermal hotspots from historical flights (thermal.kk7.ch)',
               selected: showHotspots,
               onSelected: (v) => setState(() => showHotspots = v),
+            ),
+            const SizedBox(width: 6),
+            FilterChip(
+              avatar: const Icon(Icons.layers, size: 16),
+              label: const Text('Airspace'),
+              tooltip: AirspaceStore.instance.airspaces.isEmpty
+                  ? 'Import an OpenAIR airspace file in Settings'
+                  : '${AirspaceStore.instance.airspaces.length} airspaces',
+              selected: showAirspace && AirspaceStore.instance.airspaces.isNotEmpty,
+              onSelected: (v) => setState(() => showAirspace = v),
             ),
             const SizedBox(width: 6),
             FilterChip(

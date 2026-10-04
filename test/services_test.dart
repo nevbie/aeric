@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:aeric/core/flight/igc.dart';
+import 'package:aeric/core/airspace.dart';
+import 'package:aeric/services/airspace_store.dart';
 import 'package:aeric/services/flight_controller.dart';
 import 'package:aeric/services/logbook.dart';
 import 'package:archive/archive.dart';
@@ -75,5 +77,30 @@ void main() {
     expect(fc.landing!.id, anyOf('merkur-west', 'merkur-grossmatte'));
     expect(fc.finalGlideToLanding!.distanceKm, lessThan(5));
     expect(fc.track.length, greaterThan(600));
+  });
+
+  test('airspace store imports, persists and feeds the flight controller', () async {
+    final dir = await Directory.systemTemp.createTemp('aeric-air');
+    addTearDown(() => dir.delete(recursive: true));
+    final store = AirspaceStore(dir: () async => dir);
+    expect(await store.importText('garbage', from: 'x.txt'), 0);
+    expect(store.error, contains('No airspaces'));
+    // A CTR around the synthetic flight's thermal (Merkur), GND–2500 ft.
+    const ctr = 'AC CTR\nAN MERKUR TEST\nAL GND\nAH 2500ft MSL\nV X=48:46:00 N 008:16:30 E\nDC 3\n';
+    expect(await store.importText(ctr, from: 'test.air'), 1);
+    final again = AirspaceStore(dir: () async => dir);
+    await again.load();
+    expect(again.airspaces.single.name, 'MERKUR TEST');
+
+    AirspaceStore.instance.airspaces = store.airspaces;
+    addTearDown(() => AirspaceStore.instance.airspaces = const []);
+    final fc = FlightController.instance..reset();
+    final fixes = syntheticFlight();
+    for (final f in fixes.take(250)) {
+      fc.onPressure(f.time, 1013.25 * math.pow(1 - f.altM / 44330.77, 1 / 0.190263));
+      fc.onPosition(f);
+    }
+    expect(fc.airspaceWarnings, isNotEmpty);
+    expect(fc.airspaceWarnings.first.level, AirspaceLevel.inside);
   });
 }
