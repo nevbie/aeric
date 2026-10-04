@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../core/flyability.dart';
+import '../core/site.dart';
 import '../core/thermal_model.dart';
+import '../services/app_state.dart';
 
 const aericBlue = Color(0xFF1E88E5);
 const goColor = Color(0xFF2E7D32);
@@ -60,4 +62,22 @@ class ErrorText extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         child: Text(text, style: TextStyle(color: Theme.of(context).colorScheme.error)),
       );
+}
+
+/// Star that adds/removes a site from the favourites.
+class FavouriteButton extends StatelessWidget {
+  const FavouriteButton(this.site, {super.key});
+  final Site site;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppState.instance;
+    final fav = app.isFavourite(site);
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      tooltip: fav ? 'Remove from favourites' : 'Add to favourites',
+      icon: Icon(fav ? Icons.star : Icons.star_border, color: fav ? Colors.amber : null),
+      onPressed: () => app.toggleFavourite(site),
+    );
+  }
 }

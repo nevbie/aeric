@@ -35,8 +35,10 @@ class OpenMeteoClient {
 }
 
 /// Parses an hourly Open-Meteo response; works for both the forecast and the archive API.
-List<WeatherHour> parseOpenMeteo(String body) {
-  final root = jsonDecode(body) as Map<String, dynamic>;
+List<WeatherHour> parseOpenMeteo(String body) => parseOpenMeteoJson(jsonDecode(body) as Map<String, dynamic>);
+
+/// Parses one location object of an Open-Meteo response (multi-location responses are a list of these).
+List<WeatherHour> parseOpenMeteoJson(Map<String, dynamic> root) {
   final elevation = (root['elevation'] as num?)?.toDouble() ?? 0;
   final utcOffset = (root['utc_offset_seconds'] as num?)?.toInt() ?? 0;
   final h = root['hourly'] as Map<String, dynamic>;
