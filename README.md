@@ -54,6 +54,8 @@ flutter build ios --release            # iOS (needs macOS + Xcode; signing for d
 GitHub Actions runs analyze and tests on every push. It also builds the Android APK (uploaded as
 an artifact) and an unsigned iOS build to prove the iOS target compiles.
 
+See **[docs/PLAN.md](docs/PLAN.md)** for the roadmap (in-flight vario, thermal assistant, tasks, airspace, IGC logbook, …).
+
 ## Layout
 
 - `lib/core/` is pure Dart, unit-tested and free of Flutter imports: Open-Meteo forecast and
