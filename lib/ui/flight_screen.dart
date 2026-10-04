@@ -8,6 +8,7 @@ import '../services/flight_controller.dart';
 import '../services/settings.dart';
 import 'common.dart';
 import 'settings_screen.dart';
+import 'thermal_assistant_view.dart';
 
 /// In-flight instruments: vario, altitude, height above ground, speed, wind, glide.
 class FlightScreen extends StatelessWidget {
@@ -25,6 +26,7 @@ class FlightScreen extends StatelessWidget {
         return Column(children: [
           if (fc.airspaceWarnings.isNotEmpty) _AirspaceBanner(fc.airspaceWarnings),
           _VarioPanel(fc.varioMs, fc.avg30Ms, fc.thermalAvgMs, fc.thermalGainM, fc.varioSource),
+          if (fc.assist case final a?) ThermalAssistantView(a, trackDeg: fc.trackDeg),
           Expanded(
             child: GridView.count(
               crossAxisCount: 3,

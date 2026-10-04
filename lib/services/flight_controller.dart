@@ -15,6 +15,7 @@ import '../core/flight/flight_analysis.dart';
 import '../core/flight/geo.dart';
 import '../core/flight/glide.dart';
 import '../core/flight/igc.dart';
+import '../core/flight/thermal_assistant.dart';
 import '../core/flight/vario.dart';
 import '../core/flight/wind.dart';
 import '../core/landing.dart';
@@ -60,6 +61,11 @@ class FlightController extends ChangeNotifier {
   List<AirspaceWarning> airspaceWarnings = const [];
   final _announced = <String, DateTime>{};
   static const _airspaceChecker = AirspaceChecker();
+
+  /// Thermal centering aid while circling.
+  final _assistant = ThermalAssistant();
+  ThermalAssist? assist;
+  bool circling = false;
 
   /// Climb since circling started (thermal average) and its gain.
   double? thermalAvgMs;
@@ -259,6 +265,9 @@ class FlightController extends ChangeNotifier {
     thermalGainM = null;
     airspaceWarnings = const [];
     _announced.clear();
+    _assistant.clear();
+    assist = null;
+    circling = false;
     _lastExternalPressure = null;
     _lastPhoneFix = null;
   }
@@ -373,7 +382,11 @@ class FlightController extends ChangeNotifier {
       if (distanceM(a.lat, a.lon, b.lat, b.lon) < 1 || distanceM(b.lat, b.lon, c.lat, c.lon) < 1) continue;
       turned += turnDeg(bearingDeg(a.lat, a.lon, b.lat, b.lon), bearingDeg(b.lat, b.lon, c.lat, c.lon));
     }
-    final circling = turned.abs() >= 300;
+    circling = turned.abs() >= 300;
+    _assistant.add(LiftSample(f.time, f.lat, f.lon, varioMs));
+    assist = circling
+        ? _assistant.evaluate(now: f.time, lat: f.lat, lon: f.lon, windFromDeg: wind?.fromDeg ?? 0, windKmh: wind?.speedKmh ?? 0)
+        : null;
     if (circling) {
       _circlingFixes++;
       _thermalStart ??= recent.first;
