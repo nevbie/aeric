@@ -9,10 +9,12 @@ import '../core/flyability.dart';
 import '../core/site.dart';
 import '../core/thermal_grid.dart';
 import '../core/solar.dart';
+import '../core/task/task.dart';
 import '../core/thermal_model.dart';
 import '../services/app_state.dart';
 import '../services/airspace_store.dart';
 import '../services/logbook.dart';
+import '../services/task_store.dart';
 import 'common.dart';
 import 'place_editor.dart';
 
@@ -191,7 +193,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([AppState.instance, Logbook.instance, AirspaceStore.instance]),
+        listenable: Listenable.merge([AppState.instance, Logbook.instance, AirspaceStore.instance, TaskStore.instance]),
         builder: (context, _) => _build(context),
       );
 
@@ -256,6 +258,33 @@ class _MapScreenState extends State<MapScreen> {
                     color: climbColor(v.climbMs).withValues(alpha: 0.45),
                   ),
             ]),
+          if (TaskStore.instance.task case final task?) ...[
+            CircleLayer(circles: [
+              for (final tp in task.turnpoints)
+                CircleMarker(
+                  point: LatLng(tp.lat, tp.lon),
+                  radius: tp.radiusM,
+                  useRadiusInMeter: true,
+                  color: const Color(0x1A7B1FA2),
+                  borderColor: const Color(0xFF7B1FA2),
+                  borderStrokeWidth: 2,
+                ),
+            ]),
+            PolylineLayer(polylines: [
+              Polyline(
+                points: () {
+                  final tps = task.turnpoints;
+                  final from = tps.indexWhere((t) => t.type.name != 'takeoff');
+                  final first = tps[from < 0 ? 0 : from];
+                  final r = optimiseRoute(first.lat, first.lon, tps.sublist((from < 0 ? 0 : from) + 1),
+                      goalLine: task.goalType == GoalType.line);
+                  return [LatLng(first.lat, first.lon), for (final (a, b) in r.points) LatLng(a, b)];
+                }(),
+                color: const Color(0xFF7B1FA2),
+                strokeWidth: 3,
+              ),
+            ]),
+          ],
           MarkerLayer(markers: [
             for (final l in app.landings)
               Marker(

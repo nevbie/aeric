@@ -3,11 +3,15 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../core/airspace.dart';
+import '../core/flight/geo.dart';
 import '../core/geo.dart';
 import '../services/flight_controller.dart';
 import '../services/settings.dart';
+import '../services/task_store.dart';
+import '../core/task/task.dart';
 import 'common.dart';
 import 'settings_screen.dart';
+import 'task_sheet.dart';
 import 'thermal_assistant_view.dart';
 
 /// In-flight instruments: vario, altitude, height above ground, speed, wind, glide.
@@ -18,7 +22,7 @@ class FlightScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final fc = FlightController.instance;
     return ListenableBuilder(
-      listenable: fc,
+      listenable: Listenable.merge([fc, TaskStore.instance]),
       builder: (context, _) {
         final f = fc.fix;
         final fg = fc.finalGlideToLanding;
@@ -27,6 +31,7 @@ class FlightScreen extends StatelessWidget {
           if (fc.airspaceWarnings.isNotEmpty) _AirspaceBanner(fc.airspaceWarnings),
           _VarioPanel(fc.varioMs, fc.avg30Ms, fc.thermalAvgMs, fc.thermalGainM, fc.varioSource),
           if (fc.assist case final a?) ThermalAssistantView(a, trackDeg: fc.trackDeg),
+          if (TaskStore.instance.task != null) _TaskCard(fc),
           Expanded(
             child: GridView.count(
               crossAxisCount: 3,
@@ -44,7 +49,7 @@ class FlightScreen extends StatelessWidget {
                 _Tile(
                   'Landing',
                   fg == null ? '–' : '${fg.distanceKm.toStringAsFixed(1)} km',
-                  fc.landing == null ? 'none within 40 km' : '${fc.landing!.name} · ${compass(fg!.bearingDeg)}',
+                  fc.landing == null || fg == null ? 'none within 40 km' : '${fc.landing!.name} · ${compass(fg.bearingDeg)}',
                 ),
                 _Tile(
                   'Needed L/D',
@@ -83,6 +88,11 @@ class FlightScreen extends StatelessWidget {
                 tooltip: fc.audio.muted ? 'Vario sound on' : 'Mute vario',
                 icon: Icon(fc.audio.muted ? Icons.volume_off : Icons.volume_up),
                 onPressed: fc.toggleMute,
+              ),
+              IconButton.filledTonal(
+                tooltip: 'Competition task',
+                icon: const Icon(Icons.flag_circle_outlined),
+                onPressed: () => showTaskSheet(context),
               ),
               IconButton.filledTonal(
                 tooltip: 'Settings',
@@ -280,6 +290,51 @@ class _WindTile extends StatelessWidget {
           ),
         ),
         Text(fromDeg == null ? 'circle once' : 'km/h from ${compass(fromDeg!)}', style: t.labelSmall, maxLines: 1),
+      ]),
+    );
+  }
+}
+
+class _TaskCard extends StatelessWidget {
+  const _TaskCard(this.fc);
+  final FlightController fc;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = TaskStore.instance.progress!;
+    final t = Theme.of(context).textTheme;
+    final next = p.nextTurnpoint;
+    final route = fc.taskRoute;
+    final f = fc.fix;
+    String line;
+    if (next == null) {
+      line = 'Goal reached${p.speedSectionTime == null ? '' : ' · SS ${p.speedSectionTime!.inMinutes} min'}';
+    } else if (route == null || f == null || route.legsM.isEmpty) {
+      line = 'Next: ${next.name}';
+    } else {
+      final toNext = route.legsM.first;
+      final touch = route.points.first;
+      final brg = bearingDeg(f.lat, f.lon, touch.$1, touch.$2);
+      final eta = fc.groundSpeedKmh > 5 ? Duration(seconds: (toNext / (fc.groundSpeedKmh / 3.6)).round()) : null;
+      line = '${next.name} ${(toNext / 1000).toStringAsFixed(1)} km ${compass(brg)}'
+          '${eta == null ? '' : ' · ${eta.inMinutes} min'}'
+          ' · goal ${(route.totalM / 1000).toStringAsFixed(1)} km'
+          '${fc.taskRequiredGlide == null ? '' : ' · L/D ${fc.taskRequiredGlide!.toStringAsFixed(1)}'}';
+    }
+    final gate = p.stage == TaskStage.beforeStart && f != null ? p.nextGate(f.time) : null;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(6, 6, 6, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        const Icon(Icons.flag_circle),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(line, style: t.titleSmall, maxLines: 2, overflow: TextOverflow.ellipsis),
+            if (gate != null) Text('Start gate opens in ${gate.inMinutes}:${(gate.inSeconds % 60).toString().padLeft(2, '0')}', style: t.bodySmall),
+          ]),
+        ),
       ]),
     );
   }

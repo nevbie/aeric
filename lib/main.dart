@@ -4,6 +4,7 @@ import 'services/airspace_store.dart';
 import 'services/app_state.dart';
 import 'services/logbook.dart';
 import 'services/settings.dart';
+import 'services/task_store.dart';
 import 'ui/common.dart';
 import 'ui/flight_screen.dart';
 import 'ui/fly_screen.dart';
@@ -17,6 +18,7 @@ void main() {
   AppState.instance.loadFavourites();
   Logbook.instance.load();
   AirspaceStore.instance.load();
+  TaskStore.instance.load();
   runApp(const AericApp());
   AppState.instance.refreshForecasts();
 }

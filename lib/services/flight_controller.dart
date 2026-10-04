@@ -19,12 +19,14 @@ import '../core/flight/thermal_assistant.dart';
 import '../core/flight/vario.dart';
 import '../core/flight/wind.dart';
 import '../core/landing.dart';
+import '../core/task/task.dart';
 import '../core/devices/vario_protocols.dart';
 import 'airspace_store.dart';
 import 'app_state.dart';
 import 'ble_vario.dart';
 import 'logbook.dart';
 import 'settings.dart';
+import 'task_store.dart';
 import 'vario_audio.dart';
 
 enum FlightMode { idle, live, replay }
@@ -61,6 +63,10 @@ class FlightController extends ChangeNotifier {
   List<AirspaceWarning> airspaceWarnings = const [];
   final _announced = <String, DateTime>{};
   static const _airspaceChecker = AirspaceChecker();
+
+  /// Competition task navigation (when a task is loaded).
+  OptimisedRoute? taskRoute;
+  double? taskRequiredGlide;
 
   /// Thermal centering aid while circling.
   final _assistant = ThermalAssistant();
@@ -252,6 +258,7 @@ class FlightController extends ChangeNotifier {
     wind = null;
     glideRatio = null;
     finalGlideToLanding = null;
+    landing = null;
     terrainM = null;
     varioMs = 0;
     avg30Ms = null;
@@ -267,6 +274,8 @@ class FlightController extends ChangeNotifier {
     _announced.clear();
     _assistant.clear();
     assist = null;
+    taskRoute = null;
+    taskRequiredGlide = null;
     circling = false;
     _lastExternalPressure = null;
     _lastPhoneFix = null;
@@ -313,7 +322,31 @@ class FlightController extends ChangeNotifier {
     _updateWindAndGlide(f);
     _updateTerrain(f);
     _updateAirspace(f);
+    _updateTask(f);
     notifyListeners();
+  }
+
+  void _updateTask(Fix f) {
+    final progress = TaskStore.instance.progress;
+    if (progress == null) {
+      taskRoute = null;
+      taskRequiredGlide = null;
+      return;
+    }
+    final reached = progress.update(f.time, f.lat, f.lon);
+    if (reached != null) {
+      _say(switch (progress.stage) {
+        TaskStage.racing when reached.type == TurnpointType.sss => 'Start. Go!',
+        TaskStage.essReached when reached.type == TurnpointType.ess => 'End of speed section',
+        TaskStage.goal => 'Goal!',
+        _ => 'Turnpoint ${reached.name} reached',
+      });
+      TaskStore.instance.changed();
+    }
+    taskRoute = progress.nextTurnpoint == null ? null : progress.remainingRoute(f.lat, f.lon);
+    final goal = progress.task.goal;
+    final above = f.altM - goal.altM - Settings.instance.safetyMarginM;
+    taskRequiredGlide = taskRoute == null || above <= 0 ? null : taskRoute!.totalM / above;
   }
 
   void _updateAirspace(Fix f) {

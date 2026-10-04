@@ -24,6 +24,8 @@ if manifest.exists():
         # Bluetooth varios.
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.BLUETOOTH_CONNECT",
+        # QR codes of competition tasks.
+        "android.permission.CAMERA",
     ]
     add = "".join(f'    <uses-permission android:name="{p}"/>\n' for p in perms if p not in m)
     m = re.sub(r"(<manifest[^>]*>\n)", lambda g: g.group(1) + add, m, count=1)
@@ -87,6 +89,7 @@ if plist.exists():
         "NSLocationAlwaysAndWhenInUseUsageDescription": "aeric keeps recording your flight and the vario running when the screen is off.",
         "NSMotionUsageDescription": "aeric uses the barometer (altimeter) for the variometer.",
         "NSBluetoothAlwaysUsageDescription": "aeric connects to your Bluetooth vario (XC Tracer, Skytraxx, FlyMaster …).",
+        "NSCameraUsageDescription": "aeric scans the QR code of competition tasks.",
     }
     extra = "".join(f"\t<key>{k}</key>\n\t<string>{v}</string>\n" for k, v in entries.items() if k not in s)
     if "UIBackgroundModes" not in s:

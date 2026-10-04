@@ -23,6 +23,7 @@ dependencies:
   archive: ^4.3.0
   flutter_tts: ^4.2.5
   universal_ble: ^2.3.0
+  mobile_scanner: ^7.0.0
 
 dev_dependencies:
   flutter_test:
