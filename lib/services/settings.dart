@@ -14,6 +14,9 @@ class Settings extends ChangeNotifier {
   String pilot = '';
   String glider = '';
 
+  /// Certification class of the glider (EN-A … CCC, Tandem), if chosen from the list.
+  String gliderClass = '';
+
   /// Glider polar at trim speed.
   double trimKmh = 38;
   double trimSinkMs = 1.1;
@@ -42,6 +45,7 @@ class Settings extends ChangeNotifier {
       final p = _p!;
       pilot = p.getString('pilot') ?? pilot;
       glider = p.getString('glider') ?? glider;
+      gliderClass = p.getString('gliderClass') ?? gliderClass;
       trimKmh = p.getDouble('trimKmh') ?? trimKmh;
       trimSinkMs = p.getDouble('trimSink') ?? trimSinkMs;
       safetyMarginM = p.getDouble('safety') ?? safetyMarginM;
@@ -64,6 +68,7 @@ class Settings extends ChangeNotifier {
     if (p == null) return;
     await p.setString('pilot', pilot);
     await p.setString('glider', glider);
+    await p.setString('gliderClass', gliderClass);
     await p.setDouble('trimKmh', trimKmh);
     await p.setDouble('trimSink', trimSinkMs);
     await p.setDouble('safety', safetyMarginM);

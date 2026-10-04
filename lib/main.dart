@@ -29,7 +29,7 @@ class AericApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     ThemeData theme(Brightness b) =>
-        ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: aericBlue, brightness: b), useMaterial3: true);
+        ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: aericOrange, brightness: b), useMaterial3: true);
     return MaterialApp(
       title: 'aeric',
       debugShowCheckedModeBanner: false,

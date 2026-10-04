@@ -6,6 +6,9 @@ import '../core/thermal_model.dart';
 import '../services/app_state.dart';
 
 const aericBlue = Color(0xFF1E88E5);
+
+/// Brand colour (logo orange).
+const aericOrange = Color(0xFFF57C00);
 const goColor = Color(0xFF2E7D32);
 const marginalColor = Color(0xFFF9A825);
 const noGoColor = Color(0xFFC62828);

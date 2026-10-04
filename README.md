@@ -96,6 +96,7 @@ flutter pub get
 flutter analyze && flutter test        # logic + widget smoke test
 flutter create --platforms=android,ios --org com.nevbie --project-name aeric .
 python3 tool/patch_platforms.py
+dart run flutter_launcher_icons        # app icon from assets/icon/
 flutter build apk --release            # Android
 flutter build ios --release            # iOS (needs macOS + Xcode; signing for devices)
 ```

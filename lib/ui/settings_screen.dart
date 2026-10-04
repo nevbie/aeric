@@ -5,6 +5,7 @@ import '../services/airspace_store.dart';
 import '../services/app_state.dart';
 import '../services/ble_vario.dart';
 import '../services/settings.dart';
+import 'glider_picker.dart';
 
 /// Pilot, glider, final glide, vario sound and altimeter settings; own sites.
 class SettingsScreen extends StatefulWidget {
@@ -65,6 +66,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListenableBuilder(
         listenable: Listenable.merge([st, app, AirspaceStore.instance, BleVario.instance]),
         builder: (context, _) => ListView(children: [
+          const _Logo(),
           const _Header('Pilot (written into recorded IGC files)'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -74,12 +76,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (v) => st.update((s) => s.pilot = v.trim()),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: TextField(
-              controller: _glider,
-              decoration: const InputDecoration(labelText: 'Glider'),
-              onChanged: (v) => st.update((s) => s.glider = v.trim()),
+          ListTile(
+            leading: const Icon(Icons.paragliding),
+            title: Text(st.glider.isEmpty ? 'No glider chosen' : st.glider),
+            subtitle: st.gliderClass.isEmpty ? null : Text(st.gliderClass),
+            trailing: FilledButton.tonal(
+              onPressed: () async {
+                await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const GliderPickerScreen()));
+                _glider.text = st.glider;
+              },
+              child: const Text('Schirm wählen'),
             ),
           ),
           const _Header('Glider polar and final glide'),
@@ -225,4 +231,26 @@ class _BleSection extends StatelessWidget {
       ]),
     );
   }
+}
+
+class _Logo extends StatelessWidget {
+  const _Logo();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        child: Row(children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Image.asset('assets/icon/icon.png', width: 56, height: 56),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('aeric', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+              Text('Paragliding · thermals · flight', style: Theme.of(context).textTheme.bodySmall),
+            ]),
+          ),
+        ]),
+      );
 }

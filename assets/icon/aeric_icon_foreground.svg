@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- aeric app icon: orange sky, sun, paraglider whose lines lead to a heart with an "E". -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFA726"/>
+      <stop offset="1" stop-color="#F4511E"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFF8E1"/>
+      <stop offset="0.6" stop-color="#FFE082"/>
+      <stop offset="1" stop-color="#FFCA28"/>
+    </radialGradient>
+  </defs>
+  <g id="background">
+    
+  </g>
+  <g id="artwork" transform="translate(512 512) scale(0.66) translate(-512 -540)">
+    <!-- Sun with rays, upper right, behind the wing -->
+    <g transform="translate(700 330)">
+      <g stroke="#FFE082" stroke-width="22" stroke-linecap="round" opacity="0.9">
+        <line x1="0" y1="-230" x2="0" y2="-185"/>
+        <line x1="0" y1="185" x2="0" y2="230"/>
+        <line x1="-230" y1="0" x2="-185" y2="0"/>
+        <line x1="185" y1="0" x2="230" y2="0"/>
+        <line x1="-163" y1="-163" x2="-131" y2="-131"/>
+        <line x1="131" y1="131" x2="163" y2="163"/>
+        <line x1="-163" y1="163" x2="-131" y2="131"/>
+        <line x1="131" y1="-131" x2="163" y2="-163"/>
+      </g>
+      <circle r="150" fill="url(#sun)"/>
+    </g>
+    <!-- Paraglider wing: a curved canopy with cells -->
+    <path d="M150 400 C 260 210, 764 210, 874 400 C 760 330, 264 330, 150 400 Z" fill="#FFFFFF"/>
+    <g stroke="#F4511E" stroke-width="7" opacity="0.55">
+      <line x1="262" y1="300" x2="270" y2="352"/>
+      <line x1="372" y1="262" x2="376" y2="330"/>
+      <line x1="512" y1="248" x2="512" y2="322"/>
+      <line x1="652" y1="262" x2="648" y2="330"/>
+      <line x1="762" y1="300" x2="754" y2="352"/>
+    </g>
+    <!-- Lines from the wing down to the heart -->
+    <g stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" opacity="0.95">
+      <line x1="170" y1="392" x2="452" y2="660"/>
+      <line x1="300" y1="345" x2="468" y2="652"/>
+      <line x1="420" y1="327" x2="486" y2="646"/>
+      <line x1="604" y1="327" x2="538" y2="646"/>
+      <line x1="724" y1="345" x2="556" y2="652"/>
+      <line x1="854" y1="392" x2="572" y2="660"/>
+    </g>
+    <!-- Heart (the pilot) with an E -->
+    <path d="M512 880
+             C 488 852, 372 780, 372 702
+             C 372 650, 410 618, 452 618
+             C 482 618, 502 634, 512 654
+             C 522 634, 542 618, 572 618
+             C 614 618, 652 650, 652 702
+             C 652 780, 536 852, 512 880 Z"
+          fill="#FFFFFF" stroke="#BF360C" stroke-width="8"/>
+    <g fill="#E64A19">
+      <rect x="468" y="662" width="30" height="140" rx="6"/>
+      <rect x="468" y="662" width="96" height="28" rx="6"/>
+      <rect x="468" y="718" width="80" height="26" rx="6"/>
+      <rect x="468" y="774" width="96" height="28" rx="6"/>
+    </g>
+  </g>
+</svg>
