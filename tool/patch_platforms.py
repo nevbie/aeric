@@ -36,6 +36,44 @@ if manifest.exists():
     manifest.write_text(m)
     print("patched", manifest)
 
+# Some plugins (e.g. flutter_pcm_sound) still compile against API 33, but newer AndroidX
+# dependencies (androidx.exifinterface via file_picker) need every module on API 34+.
+# Raise compileSdk of all plugin modules; registered before evaluationDependsOn(":app").
+COMPILE_SDK = 36
+kts = root / "android/build.gradle.kts"
+groovy = root / "android/build.gradle"
+marker = "aeric: raise plugin compileSdk"
+if kts.exists() and marker not in kts.read_text():
+    s = kts.read_text()
+    block = f"""// {marker}
+subprojects {{
+    if (name != "app") {{
+        val raise: Project.() -> Unit = {{
+            extensions.findByName("android")?.withGroovyBuilder {{ "compileSdkVersion"({COMPILE_SDK}) }}
+        }}
+        if (state.executed) raise() else afterEvaluate {{ raise() }}
+    }}
+}}
+"""
+    anchor = "subprojects {\n    project.evaluationDependsOn"
+    s = s.replace(anchor, block + anchor, 1) if anchor in s else s + "\n" + block
+    kts.write_text(s)
+    print("patched", kts)
+elif groovy.exists() and marker not in groovy.read_text():
+    s = groovy.read_text()
+    block = f"""// {marker}
+subprojects {{ p ->
+    if (p.name != "app") {{
+        def raise = {{ if (p.extensions.findByName("android") != null) p.android.compileSdkVersion({COMPILE_SDK}) }}
+        if (p.state.executed) raise() else p.afterEvaluate {{ raise() }}
+    }}
+}}
+"""
+    anchor = "subprojects {\n    project.evaluationDependsOn"
+    s = s.replace(anchor, block + anchor, 1) if anchor in s else s + "\n" + block
+    groovy.write_text(s)
+    print("patched", groovy)
+
 # ---------------------------------------------------------------- iOS
 plist = root / "ios/Runner/Info.plist"
 if plist.exists():
