@@ -66,8 +66,7 @@ class _FlyScreenState extends State<FlyScreen> {
         ]),
       ),
       if (app.loadingForecasts) const LinearProgressIndicator(),
-      for (final e in app.forecastErrors.entries)
-        ErrorText('${app.sites.firstWhere((s) => s.id == e.key).name}: ${e.value}'),
+      if (app.forecastError case final e?) ErrorText(e),
       Expanded(
         child: ListView(
           padding: const EdgeInsets.all(12),

@@ -83,7 +83,11 @@ class HistoricalWeatherClient {
     required DateTime today,
   }) async {
     final windows = seasonalWindows(date, years: years, halfWindowDays: halfWindowDays, today: today);
-    final parts = await Future.wait(windows.map((w) => history(lat, lon, w.start, w.end)));
-    return [for (final p in parts) ...p];
+    // One after the other: the API limits concurrent requests.
+    final out = <WeatherHour>[];
+    for (final w in windows) {
+      out.addAll(await history(lat, lon, w.start, w.end));
+    }
+    return out;
   }
 }
