@@ -3,7 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../core/flight/thermal_conditions.dart';
 import '../core/geo.dart';
+import '../core/leonardo.dart';
 import '../core/live_thermal.dart';
 import '../core/site.dart';
 import '../core/thermal_climatology.dart';
@@ -29,7 +31,10 @@ class _ThermalScreenState extends State<ThermalScreen> {
   @override
   void initState() {
     super.initState();
-    app.loadClimatology(site);
+    // Not during build: loading notifies listeners right away.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) app.loadClimatology(site);
+    });
     // Keep "now" current; pull a fresh model run every 30 minutes.
     _tick = Timer.periodic(const Duration(minutes: 1), (_) {
       final loaded = app.forecastsLoadedAt;
@@ -110,6 +115,8 @@ class _ThermalScreenState extends State<ThermalScreen> {
               const SizedBox(height: 10),
             ],
             if (clim != null) _ClimatologyCard(clim, app.siteNow(site)),
+            const SizedBox(height: 10),
+            _XcCard(site),
             if (clim == null && app.loadingClimatology.contains(site.id))
               const Padding(
                 padding: EdgeInsets.all(12),
@@ -393,5 +400,117 @@ class _ClimatologyCard extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// XC flights from this takeoff on Leonardo (paraglidingforum.com) by the weather they were flown in.
+class _XcCard extends StatelessWidget {
+  const _XcCard(this.site);
+  final Site site;
+
+  /// Forecast at 13:00 today (or tomorrow when it is late) for "flights in weather like …".
+  (WeatherCondition, String)? _reference(AppState app) {
+    final f = app.forecasts[site.id];
+    if (f == null) return null;
+    final now = app.siteNow(site);
+    final day = now.hour >= 16 ? DateTime(now.year, now.month, now.day + 1) : DateTime(now.year, now.month, now.day);
+    final h = f.where((x) => x.time == DateTime(day.year, day.month, day.day, 13)).firstOrNull;
+    return h == null ? null : (WeatherCondition.of(h), now.hour >= 16 ? 'tomorrow 13:00' : 'today 13:00');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppState.instance;
+    final t = Theme.of(context).textTheme;
+    final stats = app.xcStats[site.id];
+    final loading = app.loadingXc.contains(site.id);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('XC history (Leonardo)', style: t.titleMedium),
+          if (stats == null) ...[
+            Text(
+              'XC flights that started here in the last 6 years (paraglidingforum.com Leonardo, metadata only), '
+              'matched with the weather at their takeoff hour.',
+              style: t.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            loading
+                ? const LinearProgressIndicator()
+                : FilledButton.tonalIcon(
+                    onPressed: () => app.loadXcStats(site),
+                    icon: const Icon(Icons.download),
+                    label: const Text('Load XC flights'),
+                  ),
+          ],
+          if (app.xcErrors[site.id] case final e?) ErrorText(e),
+          if (stats != null) ..._content(context, app, stats),
+        ]),
+      ),
+    );
+  }
+
+  List<Widget> _content(BuildContext context, AppState app, SiteXcStats stats) {
+    final t = Theme.of(context).textTheme;
+    if (stats.flights.isEmpty) return [Text('No XC flights from this takeoff on Leonardo.', style: t.bodySmall)];
+    final ref = _reference(app);
+    final like = ref == null ? null : stats.like(ref.$1);
+    final maxWind = stats.windRanking.isEmpty ? 1 : stats.windRanking.first.flights;
+    final hours = stats.byHour.entries.toList()..sort((a, b) => b.value.flights.compareTo(a.value.flights));
+    final months = stats.byMonth.values.where((b) => b.flights > 0).toList()..sort((a, b) => b.flights.compareTo(a.flights));
+    String km(Bucket b) => b.avgKm == null ? '' : ' · Ø ${b.avgKm!.toStringAsFixed(0)} km';
+    return [
+      Text('${stats.flights.length} flights · ${stats.withWeather} with weather', style: t.bodySmall),
+      if (ref != null && like != null)
+        _Bullet(
+          Icons.air,
+          '${like.length} flights were flown in weather like ${ref.$2} '
+          '(${ref.$1.windKmh.round()} km/h ${compass(ref.$1.windFromDeg)}'
+          '${ref.$1.cloudCover == null ? '' : ', ☁${ref.$1.cloudCover!.round()} %'})'
+          '${like.isEmpty ? '' : ', longest ${like.map((w) => w.flight.distanceKm ?? 0).reduce((a, b) => a > b ? a : b).toStringAsFixed(0)} km'}',
+        ),
+      const SizedBox(height: 8),
+      Text('Wind at takeoff', style: t.labelMedium),
+      for (final b in stats.windRanking)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: Row(children: [
+            SizedBox(width: 40, child: Text(b.label, style: t.bodySmall)),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, box) => Align(
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    width: box.maxWidth * b.flights / maxWind,
+                    height: 10,
+                    decoration: BoxDecoration(color: aericBlue, borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(width: 96, child: Text('${b.flights}${km(b)}', textAlign: TextAlign.right, style: t.bodySmall)),
+          ]),
+        ),
+      const SizedBox(height: 8),
+      Text('Cloud cover at takeoff', style: t.labelMedium),
+      Text(
+        stats.byCloud.values.where((b) => b.flights > 0).map((b) => '${b.label}: ${b.flights}${km(b)}').join(' · '),
+        style: t.bodySmall,
+      ),
+      if (hours.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text('Takeoff time', style: t.labelMedium),
+        Text(hours.take(4).map((e) => '${e.key}:00 – ${e.value.flights}').join(' · '), style: t.bodySmall),
+      ],
+      const SizedBox(height: 8),
+      Text('Best months', style: t.labelMedium),
+      Text(months.take(4).map((b) => '${b.label} ${b.flights}${km(b)}').join(' · '), style: t.bodySmall),
+      const SizedBox(height: 6),
+      Text(
+        'Source: paraglidingforum.com Leonardo (public listing). Times as recorded by the server.',
+        style: t.bodySmall?.copyWith(fontSize: 11),
+      ),
+    ];
   }
 }

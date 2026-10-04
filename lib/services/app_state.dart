@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/elevation.dart';
 import '../core/historical_weather.dart';
 import '../core/landing.dart';
+import '../core/leonardo.dart';
 import '../core/open_meteo.dart';
 import '../core/sample_sites.dart';
 import '../core/site.dart';
@@ -26,6 +27,44 @@ class AppState extends ChangeNotifier {
         _history = HistoricalWeatherClient(
           diskCached(_get, cacheDir ?? () async => Directory('${(await getApplicationCacheDirectory()).path}/archive')),
         );
+
+  late final LeonardoClient _leonardo = LeonardoClient(diskCached(
+    _get,
+    () async => Directory('${(await getApplicationCacheDirectory()).path}/leonardo'),
+    maxAge: const Duration(days: 7),
+  ));
+
+  // ------------------------------------------------------------------ XC history (Leonardo)
+  final Map<String, SiteXcStats> xcStats = {};
+  final Map<String, String> xcErrors = {};
+  final Set<String> loadingXc = {};
+
+  /// XC flights of the last [years] years from this takeoff (paraglidingforum.com Leonardo),
+  /// joined with the ERA5 weather at their takeoff hour. Started by the user only.
+  Future<void> loadXcStats(Site site, {int years = 6}) async {
+    if (loadingXc.contains(site.id)) return;
+    loadingXc.add(site.id);
+    xcErrors.remove(site.id);
+    notifyListeners();
+    try {
+      final now = DateTime.now();
+      final flights = await _leonardo.flightsNear(site, from: DateTime(now.year - years, 1, 1), to: now);
+      // One archive request per year that has flights (only the span of those flights).
+      final hours = <WeatherHour>[];
+      final latest = now.subtract(Duration(days: _history.archiveDelayDays));
+      for (final year in {for (final f in flights) f.date.year}) {
+        final dates = flights.where((f) => f.date.year == year).map((f) => f.date).toList()..sort();
+        final end = dates.last.isAfter(latest) ? latest : dates.last;
+        if (end.isBefore(dates.first)) continue;
+        hours.addAll(await _history.history(site.lat, site.lon, dates.first, end));
+      }
+      xcStats[site.id] = SiteXcStats.build(site, attachWeather(flights, hours));
+    } catch (e) {
+      xcErrors[site.id] = 'XC history: $e';
+    }
+    loadingXc.remove(site.id);
+    notifyListeners();
+  }
 
   /// Terrain height for height above ground.
   final ElevationClient elevation;

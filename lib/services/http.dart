@@ -21,11 +21,16 @@ HttpGet networkGet({http.Client? client}) {
 
 /// Caches successful responses on disk forever. Only for immutable data such as the
 /// historical archive (a fixed past date range never changes).
-HttpGet diskCached(HttpGet delegate, Future<Directory> Function() dir) {
+///
+/// With [maxAge], entries older than that are fetched again (for listings that change).
+HttpGet diskCached(HttpGet delegate, Future<Directory> Function() dir, {Duration? maxAge}) {
   return (Uri url) async {
     final d = await dir();
     final file = File('${d.path}/${_fnv1a(url.toString())}.json');
-    if (await file.exists()) return file.readAsString();
+    if (await file.exists() &&
+        (maxAge == null || DateTime.now().difference(await file.lastModified()) < maxAge)) {
+      return file.readAsString();
+    }
     final body = await delegate(url);
     await d.create(recursive: true);
     final tmp = File('${file.path}.tmp');
