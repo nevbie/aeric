@@ -32,6 +32,31 @@ class OpenMeteoClient {
 
   Future<List<WeatherHour>> forecast(double lat, double lon, {int days = 3, int pastDays = 0}) async =>
       parseOpenMeteo(await _get(buildUrl(lat, lon, days: days, pastDays: pastDays)));
+
+  Uri buildMultiUrl(List<(double, double)> points, {int days = 3, int pastDays = 0}) => Uri.parse(
+        '$baseUrl?latitude=${points.map((p) => _f(p.$1)).join(',')}&longitude=${points.map((p) => _f(p.$2)).join(',')}'
+        '&hourly=${hourly.join(',')}&wind_speed_unit=kmh&timezone=auto&forecast_days=$days'
+        '${pastDays > 0 ? '&past_days=$pastDays' : ''}',
+      );
+
+  /// Forecasts for many places in as few requests as possible (Open-Meteo accepts lists of
+  /// coordinates). Firing one request per site gets "429 Too many concurrent requests".
+  Future<List<List<WeatherHour>>> forecastMany(
+    List<(double, double)> points, {
+    int days = 3,
+    int pastDays = 0,
+    int chunk = 25,
+  }) async {
+    final out = <List<WeatherHour>>[];
+    for (var i = 0; i < points.length; i += chunk) {
+      final part = points.sublist(i, i + chunk > points.length ? points.length : i + chunk);
+      final body = jsonDecode(await _get(buildMultiUrl(part, days: days, pastDays: pastDays)));
+      final list = body is List ? body : [body];
+      if (list.length != part.length) throw FormatException('expected ${part.length} locations, got ${list.length}');
+      out.addAll(list.map((o) => parseOpenMeteoJson(o as Map<String, dynamic>)));
+    }
+    return out;
+  }
 }
 
 /// Parses an hourly Open-Meteo response; works for both the forecast and the archive API.

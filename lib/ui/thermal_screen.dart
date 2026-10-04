@@ -102,7 +102,7 @@ class _ThermalScreenState extends State<ThermalScreen> {
         ]),
       ),
       if (app.loadingForecasts || app.loadingClimatology.contains(site.id)) const LinearProgressIndicator(),
-      if (app.forecastErrors[site.id] case final e?) ErrorText('Forecast: $e'),
+      if (app.forecastErrors[site.id] case final e?) ErrorText(e),
       if (app.climatologyErrors[site.id] case final e?) ErrorText('History: $e'),
       Expanded(
         child: ListView(

@@ -16,6 +16,7 @@ import '../core/thermal_climatology.dart';
 import '../core/thermal_grid.dart';
 import '../core/weather_hour.dart';
 import 'http.dart';
+export 'http.dart' show friendlyError;
 
 /// Holds forecasts and historical climatologies for all sites.
 class AppState extends ChangeNotifier {
@@ -60,7 +61,7 @@ class AppState extends ChangeNotifier {
       }
       xcStats[site.id] = SiteXcStats.build(site, attachWeather(flights, hours));
     } catch (e) {
-      xcErrors[site.id] = 'XC history: $e';
+      xcErrors[site.id] = 'XC history: ${friendlyError(e)}';
     }
     loadingXc.remove(site.id);
     notifyListeners();
@@ -199,7 +200,7 @@ class AppState extends ChangeNotifier {
     try {
       grid = await ThermalGrid.fetch(_get, lat, lon);
     } catch (e) {
-      gridError = 'Thermal map: $e';
+      gridError = 'Thermal map: ${friendlyError(e)}';
     }
     gridLoading = false;
     notifyListeners();
@@ -211,21 +212,30 @@ class AppState extends ChangeNotifier {
   bool loadingForecasts = false;
   DateTime? forecastsLoadedAt;
 
+  /// Short, readable reason when the forecast could not be loaded (null = fine).
+  String? forecastError;
+
   Future<void> refreshForecasts() async {
     if (loadingForecasts) return;
     loadingForecasts = true;
     notifyListeners();
-    await Future.wait(sites.map((s) async {
-      try {
-        // One past day so the thermal model sees the whole of today, incl. the morning minimum.
-        forecasts[s.id] = await _forecast.forecast(s.lat, s.lon, days: 3, pastDays: 1);
-        forecastErrors.remove(s.id);
-      } catch (e) {
-        forecastErrors[s.id] = '$e';
+    final list = [...sites];
+    try {
+      // One request for all sites (incl. one past day for today's heating history).
+      final results = await _forecast.forecastMany([for (final s in list) (s.lat, s.lon)], days: 3, pastDays: 1);
+      for (var i = 0; i < list.length; i++) {
+        forecasts[list[i].id] = results[i];
       }
-    }));
+      forecastErrors.clear();
+      forecastError = null;
+      forecastsLoadedAt = DateTime.now();
+    } catch (e) {
+      forecastError = friendlyError(e);
+      for (final s in list) {
+        forecastErrors[s.id] = forecastError!;
+      }
+    }
     loadingForecasts = false;
-    forecastsLoadedAt = DateTime.now();
     notifyListeners();
   }
 
@@ -259,7 +269,7 @@ class AppState extends ChangeNotifier {
       );
       climatologies[site.id] = await compute(_buildClimatology, (site, history));
     } catch (e) {
-      climatologyErrors[site.id] = '$e';
+      climatologyErrors[site.id] = friendlyError(e);
     }
     loadingClimatology.remove(site.id);
     notifyListeners();

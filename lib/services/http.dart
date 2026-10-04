@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -6,17 +7,84 @@ import '../core/open_meteo.dart';
 
 const userAgent = 'aeric/0.1 (paragliding planner; https://github.com/nevbie/aeric)';
 
-/// Network GET with a sensible timeout and User-Agent.
-HttpGet networkGet({http.Client? client}) {
+/// Error from a web service, with the status code and a short reason (no URL).
+class ServiceException implements Exception {
+  const ServiceException(this.status, this.reason, this.host);
+  final int status;
+  final String reason;
+  final String host;
+
+  @override
+  String toString() => 'HTTP $status from $host: $reason';
+}
+
+/// At most [_perHost] requests to the same host at a time; more would be rejected by
+/// Open-Meteo ("429 Too many concurrent requests").
+const _perHost = 2;
+final _active = <String, int>{};
+final _waiting = <String, List<Completer<void>>>{};
+
+Future<void> _acquire(String host) async {
+  while ((_active[host] ?? 0) >= _perHost) {
+    final c = Completer<void>();
+    _waiting.putIfAbsent(host, () => []).add(c);
+    await c.future;
+  }
+  _active[host] = (_active[host] ?? 0) + 1;
+}
+
+void _release(String host) {
+  _active[host] = (_active[host] ?? 1) - 1;
+  final q = _waiting[host];
+  if (q != null && q.isNotEmpty) q.removeAt(0).complete();
+}
+
+/// Network GET with a timeout, User-Agent, a per-host concurrency limit and retries with
+/// backoff when the server is busy (429/503).
+HttpGet networkGet({http.Client? client, int retries = 3, Duration backoff = const Duration(seconds: 2)}) {
   final c = client ?? http.Client();
   return (Uri url) async {
-    final res = await c.get(url, headers: {'User-Agent': userAgent}).timeout(const Duration(seconds: 30));
-    if (res.statusCode < 200 || res.statusCode > 299) {
-      final body = res.body.length > 300 ? res.body.substring(0, 300) : res.body;
-      throw HttpException('HTTP ${res.statusCode}: $body', uri: url);
+    for (var attempt = 0;; attempt++) {
+      await _acquire(url.host);
+      http.Response res;
+      try {
+        res = await c.get(url, headers: {'User-Agent': userAgent}).timeout(const Duration(seconds: 30));
+      } finally {
+        _release(url.host);
+      }
+      if (res.statusCode >= 200 && res.statusCode <= 299) return res.body;
+      final busy = res.statusCode == 429 || res.statusCode == 503;
+      if (busy && attempt < retries) {
+        await Future<void>.delayed(backoff * (1 << attempt));
+        continue;
+      }
+      throw ServiceException(res.statusCode, _reason(res.body), url.host);
     }
-    return res.body;
   };
+}
+
+/// The "reason" field of an Open-Meteo style JSON error, or the start of the body.
+String _reason(String body) {
+  final m = RegExp(r'"reason"\s*:\s*"([^"]*)"').firstMatch(body);
+  if (m != null) return m.group(1)!;
+  final text = body.replaceAll(RegExp(r'<[^>]*>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  return text.length > 120 ? '${text.substring(0, 120)}…' : text;
+}
+
+/// A short message for the UI (no URLs).
+String friendlyError(Object e) {
+  if (e is ServiceException) {
+    return switch (e.status) {
+      429 => 'Weather service busy (${e.reason}). Tap refresh in a minute.',
+      >= 500 => 'Weather service unavailable (HTTP ${e.status}). Try again later.',
+      _ => 'Weather service error (HTTP ${e.status}): ${e.reason}',
+    };
+  }
+  if (e is SocketException || e is TimeoutException || e is http.ClientException) {
+    return 'No connection to the weather service. Check your internet connection.';
+  }
+  final s = '$e';
+  return s.length > 140 ? '${s.substring(0, 140)}…' : s;
 }
 
 /// Caches successful responses on disk forever. Only for immutable data such as the
