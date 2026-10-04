@@ -4,6 +4,10 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:aeric/core/flight/igc.dart';
+import 'package:aeric/core/airspace.dart';
+import 'package:aeric/core/flight/fix.dart';
+import 'package:aeric/services/airspace_store.dart';
+import 'package:aeric/core/devices/vario_protocols.dart';
 import 'package:aeric/services/flight_controller.dart';
 import 'package:aeric/services/logbook.dart';
 import 'package:archive/archive.dart';
@@ -70,9 +74,51 @@ void main() {
     expect(fc.wind, isNotNull);
     expect(fc.wind!.fromDeg, closeTo(270, 8));
     expect(fc.wind!.speedKmh, closeTo(15, 2));
-    // Final glide target: the nearest known landing field (Hornisgrinde/Oppenau are > 15 km away).
-    expect(fc.landingSite, isNotNull);
-    expect(fc.finalGlideToLanding!.distanceKm, greaterThan(15));
+    // Final glide target: the nearest landing field – Merkur West, 1–2 km from the synthetic thermal.
+    expect(fc.landing, isNotNull);
+    expect(fc.landing!.id, anyOf('merkur-west', 'merkur-grossmatte'));
+    expect(fc.finalGlideToLanding!.distanceKm, lessThan(5));
     expect(fc.track.length, greaterThan(600));
+  });
+
+  test('airspace store imports, persists and feeds the flight controller', () async {
+    final dir = await Directory.systemTemp.createTemp('aeric-air');
+    addTearDown(() => dir.delete(recursive: true));
+    final store = AirspaceStore(dir: () async => dir);
+    expect(await store.importText('garbage', from: 'x.txt'), 0);
+    expect(store.error, contains('No airspaces'));
+    // A CTR around the synthetic flight's thermal (Merkur), GND–2500 ft.
+    const ctr = 'AC CTR\nAN MERKUR TEST\nAL GND\nAH 2500ft MSL\nV X=48:46:00 N 008:16:30 E\nDC 3\n';
+    expect(await store.importText(ctr, from: 'test.air'), 1);
+    final again = AirspaceStore(dir: () async => dir);
+    await again.load();
+    expect(again.airspaces.single.name, 'MERKUR TEST');
+
+    AirspaceStore.instance.airspaces = store.airspaces;
+    addTearDown(() => AirspaceStore.instance.airspaces = const []);
+    final fc = FlightController.instance..reset();
+    final fixes = syntheticFlight();
+    for (final f in fixes.take(250)) {
+      fc.onPressure(f.time, 1013.25 * math.pow(1 - f.altM / 44330.77, 1 / 0.190263));
+      fc.onPosition(f);
+    }
+    expect(fc.airspaceWarnings, isNotEmpty);
+    expect(fc.airspaceWarnings.first.level, AirspaceLevel.inside);
+  });
+
+  test('a Bluetooth vario overrides the phone barometer', () {
+    final fc = FlightController.instance..reset();
+    final t0 = DateTime.now().toUtc();
+    double hpa(double alt) => 1013.25 * math.pow(1 - alt / 44330.77, 1 / 0.190263);
+    // Phone barometer says level at 1000 m, BLE vario says climbing 2 m/s.
+    for (var i = 0; i < 30; i++) {
+      final t = t0.add(Duration(seconds: i));
+      fc.onExternal(VarioSample(pressureHpa: hpa(1000 + 2.0 * i), source: 'LK8EX1'), at: t);
+      fc.onPressure(t, hpa(1000), external: false);
+      fc.onPosition(Fix(time: t, lat: 48.6, lon: 8.2, gpsAltM: 1000));
+    }
+    expect(fc.hasBarometer, isTrue);
+    // Phone samples within 3 s of an external one are ignored.
+    expect(fc.varioMs, closeTo(2.0, 0.3));
   });
 }

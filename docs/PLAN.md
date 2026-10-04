@@ -124,7 +124,7 @@ before anyone flies with it.
 
 1. **v0.2 Fly with it** (in progress, see README; still missing: QNH setting, signed IGC, field testing) (≈ 8–10 weeks): F2, F1 (phone barometer + tones), F4, F5, S4, A1 (recording
    + logbook, unsigned), a simple fixed instrument screen, I2. Track export as IGC/KML (part of A2).
-2. **v0.3 XC** (≈ 8–10 weeks): S1 airspace, F3 thermal assistant, N1–N4 tasks with QR import and the
+2. **v0.3 XC** (built – needs field testing) (≈ 8–10 weeks): S1 airspace, F3 thermal assistant, N1–N4 tasks with QR import and the
    optimised route, F6 customisable screens, I1 Bluetooth varios.
 3. **v0.4 Maps and weather** (≈ 6–10 weeks): D1 offline topo, D3 site database, W1 emagram forecast,
    W2 wind stations (and use them in the live thermal estimate), D2 kk7 if allowed.

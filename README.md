@@ -51,6 +51,23 @@ estimates.
 - The kk7 **Hotspots/Skyways** layers follow the season and time of day (kk7 `jan/apr/jul/oct` ×
   morning/midday/evening after sunrise) instead of the whole year.
 
+- **v0.3** additions:
+  - **Landing fields** for every favourite takeoff (DHV/club data), used for final glide. Long-press
+    the map to add your own takeoffs and landings.
+  - **Settings**: pilot and glider (written into the IGC), polar, safety margin, vario
+    thresholds and volume, voice, manual QNH.
+  - **XC history (Leonardo)**: XC flights that started at a takeoff, by wind direction, cloud
+    cover, takeoff time and month, and how many were flown in weather like today's.
+  - **Airspace**: OpenAIR import or URL, map layer, warnings for inside, entry within 60 s and
+    proximity, with voice.
+  - **Bluetooth varios**: LK8EX1, LXWP0, XC Tracer, OpenVario, BlueFly, NMEA GPS. The
+    device's pressure replaces the phone barometer.
+  - **Thermal assistant**: drift-corrected lift map with an arrow to the core.
+  - **Competition tasks**: XCTrack QR or `.xctsk` import, optimised route, start gates,
+    turnpoints, ESS and goal with callouts, cylinders on the map.
+  - **Instrument pages**: swipe between pages, tap the edit button to change, add or remove
+    tiles (17 instruments).
+
 ## How thermals are inferred
 
 Historical hours (Open-Meteo ERA5 archive) and today's hours (Open-Meteo forecast, including the
@@ -79,6 +96,7 @@ flutter pub get
 flutter analyze && flutter test        # logic + widget smoke test
 flutter create --platforms=android,ios --org com.nevbie --project-name aeric .
 python3 tool/patch_platforms.py
+dart run flutter_launcher_icons        # app icon from assets/icon/
 flutter build apk --release            # Android
 flutter build ios --release            # iOS (needs macOS + Xcode; signing for devices)
 ```

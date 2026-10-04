@@ -15,6 +15,9 @@ class VarioAudio {
   bool _running = false;
   bool muted = false;
 
+  double get volume => _synth.volume;
+  set volume(double v) => _synth.volume = v.clamp(0.0, 1.0);
+
   Future<void> start(double Function() climbSource) async {
     climb = climbSource;
     if (_running) return;

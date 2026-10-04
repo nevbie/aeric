@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/elevation.dart';
 import '../core/historical_weather.dart';
+import '../core/landing.dart';
+import '../core/leonardo.dart';
 import '../core/open_meteo.dart';
 import '../core/sample_sites.dart';
 import '../core/site.dart';
@@ -25,6 +28,44 @@ class AppState extends ChangeNotifier {
           diskCached(_get, cacheDir ?? () async => Directory('${(await getApplicationCacheDirectory()).path}/archive')),
         );
 
+  late final LeonardoClient _leonardo = LeonardoClient(diskCached(
+    _get,
+    () async => Directory('${(await getApplicationCacheDirectory()).path}/leonardo'),
+    maxAge: const Duration(days: 7),
+  ));
+
+  // ------------------------------------------------------------------ XC history (Leonardo)
+  final Map<String, SiteXcStats> xcStats = {};
+  final Map<String, String> xcErrors = {};
+  final Set<String> loadingXc = {};
+
+  /// XC flights of the last [years] years from this takeoff (paraglidingforum.com Leonardo),
+  /// joined with the ERA5 weather at their takeoff hour. Started by the user only.
+  Future<void> loadXcStats(Site site, {int years = 6}) async {
+    if (loadingXc.contains(site.id)) return;
+    loadingXc.add(site.id);
+    xcErrors.remove(site.id);
+    notifyListeners();
+    try {
+      final now = DateTime.now();
+      final flights = await _leonardo.flightsNear(site, from: DateTime(now.year - years, 1, 1), to: now);
+      // One archive request per year that has flights (only the span of those flights).
+      final hours = <WeatherHour>[];
+      final latest = now.subtract(Duration(days: _history.archiveDelayDays));
+      for (final year in {for (final f in flights) f.date.year}) {
+        final dates = flights.where((f) => f.date.year == year).map((f) => f.date).toList()..sort();
+        final end = dates.last.isAfter(latest) ? latest : dates.last;
+        if (end.isBefore(dates.first)) continue;
+        hours.addAll(await _history.history(site.lat, site.lon, dates.first, end));
+      }
+      xcStats[site.id] = SiteXcStats.build(site, attachWeather(flights, hours));
+    } catch (e) {
+      xcErrors[site.id] = 'XC history: $e';
+    }
+    loadingXc.remove(site.id);
+    notifyListeners();
+  }
+
   /// Terrain height for height above ground.
   final ElevationClient elevation;
 
@@ -41,7 +82,48 @@ class AppState extends ChangeNotifier {
   final OpenMeteoClient _forecast;
   final HistoricalWeatherClient _history;
 
-  final List<Site> sites = sampleSites;
+  /// Built-in sites plus the pilot's own takeoffs.
+  final List<Site> sites = [...sampleSites];
+
+  /// Built-in landing fields plus the pilot's own.
+  final List<LandingField> landings = [...landingFields];
+
+  static const _userSitesKey = 'userSites';
+  static const _userLandingsKey = 'userLandings';
+
+  Future<void> addUserSite(Site s) async {
+    sites.add(s);
+    favourites.add(s.id);
+    notifyListeners();
+    await _saveUserPlaces();
+    await _prefs?.setStringList(_favouritesKey, favourites.toList());
+  }
+
+  Future<void> addUserLanding(LandingField l) async {
+    landings.add(l);
+    notifyListeners();
+    await _saveUserPlaces();
+  }
+
+  Future<void> removeUserSite(Site s) async {
+    sites.removeWhere((x) => x.id == s.id);
+    favourites.remove(s.id);
+    forecasts.remove(s.id);
+    if (thermalSiteId == s.id) thermalSiteId = null;
+    notifyListeners();
+    await _saveUserPlaces();
+  }
+
+  Future<void> removeUserLanding(LandingField l) async {
+    landings.removeWhere((x) => x.id == l.id);
+    notifyListeners();
+    await _saveUserPlaces();
+  }
+
+  Future<void> _saveUserPlaces() async {
+    await _prefs?.setString(_userSitesKey, jsonEncode([for (final s in sites.where((s) => s.userDefined)) s.toJson()]));
+    await _prefs?.setString(_userLandingsKey, jsonEncode([for (final l in landings.where((l) => l.userDefined)) l.toJson()]));
+  }
 
   Site siteById(String id) => sites.firstWhere((s) => s.id == id);
 
@@ -70,6 +152,18 @@ class AppState extends ChangeNotifier {
   Future<void> loadFavourites() async {
     try {
       _prefs = await SharedPreferences.getInstance();
+      final userSites = _prefs!.getString(_userSitesKey);
+      if (userSites != null) {
+        sites
+          ..removeWhere((s) => s.userDefined)
+          ..addAll((jsonDecode(userSites) as List).cast<Map<String, dynamic>>().map(Site.fromJson));
+      }
+      final userLandings = _prefs!.getString(_userLandingsKey);
+      if (userLandings != null) {
+        landings
+          ..removeWhere((l) => l.userDefined)
+          ..addAll((jsonDecode(userLandings) as List).cast<Map<String, dynamic>>().map(LandingField.fromJson));
+      }
       final saved = _prefs!.getStringList(_favouritesKey);
       if (saved != null) favourites = saved.where((id) => sites.any((s) => s.id == id)).toSet();
     } catch (e) {

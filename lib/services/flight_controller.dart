@@ -8,17 +8,25 @@ import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../core/airspace.dart';
 import '../core/elevation.dart';
 import '../core/flight/fix.dart';
 import '../core/flight/flight_analysis.dart';
 import '../core/flight/geo.dart';
 import '../core/flight/glide.dart';
 import '../core/flight/igc.dart';
+import '../core/flight/thermal_assistant.dart';
 import '../core/flight/vario.dart';
 import '../core/flight/wind.dart';
-import '../core/site.dart';
+import '../core/landing.dart';
+import '../core/task/task.dart';
+import '../core/devices/vario_protocols.dart';
+import 'airspace_store.dart';
 import 'app_state.dart';
+import 'ble_vario.dart';
 import 'logbook.dart';
+import 'settings.dart';
+import 'task_store.dart';
 import 'vario_audio.dart';
 
 enum FlightMode { idle, live, replay }
@@ -30,7 +38,7 @@ class FlightController extends ChangeNotifier {
 
   final audio = VarioAudio();
   late final _tts = FlutterTts(); // lazy: only created when something is spoken
-  bool voice = true;
+  bool get voice => Settings.instance.voice;
 
   FlightMode mode = FlightMode.idle;
   String? error;
@@ -46,10 +54,24 @@ class FlightController extends ChangeNotifier {
   WindEstimate? wind;
   double? glideRatio;
   FinalGlide? finalGlideToLanding;
-  Site? landingSite;
+  LandingField? landing;
   bool hasBarometer = false;
   bool flying = false;
   DateTime? takeoffTime;
+
+  /// Airspaces we are in, about to enter or close to (most urgent first).
+  List<AirspaceWarning> airspaceWarnings = const [];
+  final _announced = <String, DateTime>{};
+  static const _airspaceChecker = AirspaceChecker();
+
+  /// Competition task navigation (when a task is loaded).
+  OptimisedRoute? taskRoute;
+  double? taskRequiredGlide;
+
+  /// Thermal centering aid while circling.
+  final _assistant = ThermalAssistant();
+  ThermalAssist? assist;
+  bool circling = false;
 
   /// Climb since circling started (thermal average) and its gain.
   double? thermalAvgMs;
@@ -69,6 +91,16 @@ class FlightController extends ChangeNotifier {
   final List<(DateTime, double)> _qnhSamples = [];
   StreamSubscription<Position>? _gpsSub;
   StreamSubscription<BarometerEvent>? _baroSub;
+  StreamSubscription<VarioSample>? _bleSub;
+  DateTime? _lastExternalPressure;
+  DateTime? _lastPhoneFix;
+
+  /// Where the vario comes from: Bluetooth device, phone barometer or GPS.
+  String get varioSource {
+    final ble = BleVario.instance;
+    if (_lastExternalPressure != null && ble.connected) return ble.deviceName ?? 'Bluetooth vario';
+    return hasBarometer ? 'phone barometer' : 'GPS altitude';
+  }
   Timer? _replayTimer;
   DateTime? _lastElevationAt;
   DateTime? _groundSince;
@@ -83,7 +115,7 @@ class FlightController extends ChangeNotifier {
   }
 
   void toggleVoice() {
-    voice = !voice;
+    Settings.instance.update((s) => s.voice = !s.voice);
     notifyListeners();
   }
 
@@ -124,10 +156,13 @@ class FlightController extends ChangeNotifier {
             showBackgroundLocationIndicator: true,
           );
     _gpsSub = Geolocator.getPositionStream(locationSettings: settings).listen(
-      (p) => onPosition(
-        Fix(time: DateTime.now().toUtc(), lat: p.latitude, lon: p.longitude, gpsAltM: p.altitude, baroAltM: baroAltM),
-        speedKmh: p.speed >= 0 ? p.speed * 3.6 : null,
-      ),
+      (p) {
+        _lastPhoneFix = DateTime.now().toUtc();
+        onPosition(
+          Fix(time: _lastPhoneFix!, lat: p.latitude, lon: p.longitude, gpsAltM: p.altitude, baroAltM: baroAltM),
+          speedKmh: p.speed >= 0 ? p.speed * 3.6 : null,
+        );
+      },
       onError: (Object e) {
         error = 'GPS: $e';
         notifyListeners();
@@ -138,12 +173,38 @@ class FlightController extends ChangeNotifier {
       onError: (Object _) => hasBarometer = false, // fall back to a GPS-altitude vario
       cancelOnError: true,
     );
+    _bleSub = BleVario.instance.samples.listen(onExternal);
+    BleVario.instance.reconnect().ignore();
+    _applyAudioSettings();
     await audio.start(() => varioMs);
+  }
+
+  /// A reading from a Bluetooth vario: its pressure replaces the phone barometer; its GPS is
+  /// used when the phone has no fix.
+  void onExternal(VarioSample s, {DateTime? at}) {
+    final now = at ?? DateTime.now().toUtc();
+    if (s.pressureHpa != null) {
+      onPressure(now, s.pressureHpa!, external: true);
+    } else if (s.baroAltM != null) {
+      onPressure(now, 1013.25 * math.pow(1 - s.baroAltM! / 44330.77, 1 / 0.190263), external: true);
+    }
+    final phoneStale = _lastPhoneFix == null || now.difference(_lastPhoneFix!).inSeconds > 3;
+    if (s.hasPosition && phoneStale) {
+      onPosition(Fix(time: now, lat: s.lat!, lon: s.lon!, gpsAltM: s.gpsAltM ?? fix?.gpsAltM ?? 0, baroAltM: baroAltM),
+          speedKmh: s.groundSpeedKmh);
+    }
+  }
+
+  void _applyAudioSettings() {
+    audio.mapper = Settings.instance.toneMapper;
+    audio.volume = Settings.instance.volume;
   }
 
   Future<void> stop() async {
     await _gpsSub?.cancel();
     await _baroSub?.cancel();
+    await _bleSub?.cancel();
+    _bleSub = null;
     _gpsSub = null;
     _baroSub = null;
     _replayTimer?.cancel();
@@ -154,7 +215,8 @@ class FlightController extends ChangeNotifier {
     mode = FlightMode.idle;
     notifyListeners();
     if (wasLive && track.length > 30) {
-      await Logbook.instance.addIgc(writeIgc(track), source: 'recorded');
+      final st = Settings.instance;
+      await Logbook.instance.addIgc(writeIgc(track, pilot: st.pilot, glider: st.glider), source: 'recorded');
     }
   }
 
@@ -165,6 +227,7 @@ class FlightController extends ChangeNotifier {
     reset();
     mode = FlightMode.replay;
     notifyListeners();
+    _applyAudioSettings();
     await audio.start(() => varioMs);
     var i = 0;
     final fixes = flight.fixes;
@@ -195,6 +258,7 @@ class FlightController extends ChangeNotifier {
     wind = null;
     glideRatio = null;
     finalGlideToLanding = null;
+    landing = null;
     terrainM = null;
     varioMs = 0;
     avg30Ms = null;
@@ -206,10 +270,25 @@ class FlightController extends ChangeNotifier {
     _thermalStart = null;
     thermalAvgMs = null;
     thermalGainM = null;
+    airspaceWarnings = const [];
+    _announced.clear();
+    _assistant.clear();
+    assist = null;
+    taskRoute = null;
+    taskRequiredGlide = null;
+    circling = false;
+    _lastExternalPressure = null;
+    _lastPhoneFix = null;
   }
 
   /// Barometer sample. Altitude is calibrated (QNH) against the first GPS fixes.
-  void onPressure(DateTime t, double hPa) {
+  void onPressure(DateTime t, double hPa, {bool external = false}) {
+    // A connected Bluetooth vario wins over the phone's barometer.
+    if (external) {
+      _lastExternalPressure = t;
+    } else if (_lastExternalPressure != null && t.difference(_lastExternalPressure!).inSeconds.abs() < 3) {
+      return;
+    }
     hasBarometer = true;
     if (_qnh == null) {
       _qnhSamples.add((t, hPa));
@@ -223,7 +302,7 @@ class FlightController extends ChangeNotifier {
     // Calibrate the barometer once GPS altitude has settled (10 fixes), or right away in replay.
     if (_qnh == null && hasBarometer && _qnhSamples.isNotEmpty && (track.length >= 10 || mode == FlightMode.replay)) {
       final p = _qnhSamples.last.$2;
-      _qnh = mode == FlightMode.replay ? 1013.25 : qnhFor(p, _calibrationAltitude(raw));
+      _qnh = mode == FlightMode.replay ? 1013.25 : (Settings.instance.qnhHpa ?? qnhFor(p, _calibrationAltitude(raw)));
       _qnhSamples.clear();
     }
     final f = Fix(time: raw.time, lat: raw.lat, lon: raw.lon, gpsAltM: raw.gpsAltM, baroAltM: hasBarometer ? baroAltM : null);
@@ -242,7 +321,59 @@ class FlightController extends ChangeNotifier {
     _updateThermal(f);
     _updateWindAndGlide(f);
     _updateTerrain(f);
+    _updateAirspace(f);
+    _updateTask(f);
     notifyListeners();
+  }
+
+  void _updateTask(Fix f) {
+    final progress = TaskStore.instance.progress;
+    if (progress == null) {
+      taskRoute = null;
+      taskRequiredGlide = null;
+      return;
+    }
+    final reached = progress.update(f.time, f.lat, f.lon);
+    if (reached != null) {
+      _say(switch (progress.stage) {
+        TaskStage.racing when reached.type == TurnpointType.sss => 'Start. Go!',
+        TaskStage.essReached when reached.type == TurnpointType.ess => 'End of speed section',
+        TaskStage.goal => 'Goal!',
+        _ => 'Turnpoint ${reached.name} reached',
+      });
+      TaskStore.instance.changed();
+    }
+    taskRoute = progress.nextTurnpoint == null ? null : progress.remainingRoute(f.lat, f.lon);
+    final goal = progress.task.goal;
+    final above = f.altM - goal.altM - Settings.instance.safetyMarginM;
+    taskRequiredGlide = taskRoute == null || above <= 0 ? null : taskRoute!.totalM / above;
+  }
+
+  void _updateAirspace(Fix f) {
+    final spaces = AirspaceStore.instance.airspaces;
+    if (spaces.isEmpty) {
+      airspaceWarnings = const [];
+      return;
+    }
+    airspaceWarnings = _airspaceChecker.check(
+      spaces,
+      lat: f.lat,
+      lon: f.lon,
+      altM: f.altM,
+      groundM: terrainM ?? 0,
+      qnhHpa: _qnh ?? Settings.instance.qnhHpa ?? 1013.25,
+      trackDeg: trackDeg,
+      groundSpeedKmh: groundSpeedKmh,
+    );
+    // Speak each urgent airspace at most once a minute.
+    for (final w in airspaceWarnings) {
+      if (w.level != AirspaceLevel.inside) continue;
+      final key = '${w.airspace.cls} ${w.airspace.name}';
+      final last = _announced[key];
+      if (last != null && f.time.difference(last).inSeconds < 60) continue;
+      _announced[key] = f.time;
+      _say(w.predicted ? 'Airspace ahead: ${w.airspace.name}' : 'Inside airspace ${w.airspace.name}');
+    }
   }
 
   /// Takeoff height if we're on a known launch, otherwise GPS.
@@ -284,7 +415,11 @@ class FlightController extends ChangeNotifier {
       if (distanceM(a.lat, a.lon, b.lat, b.lon) < 1 || distanceM(b.lat, b.lon, c.lat, c.lon) < 1) continue;
       turned += turnDeg(bearingDeg(a.lat, a.lon, b.lat, b.lon), bearingDeg(b.lat, b.lon, c.lat, c.lon));
     }
-    final circling = turned.abs() >= 300;
+    circling = turned.abs() >= 300;
+    _assistant.add(LiftSample(f.time, f.lat, f.lon, varioMs));
+    assist = circling
+        ? _assistant.evaluate(now: f.time, lat: f.lat, lon: f.lon, windFromDeg: wind?.fromDeg ?? 0, windKmh: wind?.speedKmh ?? 0)
+        : null;
     if (circling) {
       _circlingFixes++;
       _thermalStart ??= recent.first;
@@ -307,24 +442,24 @@ class FlightController extends ChangeNotifier {
       glideRatio = currentGlideRatio(_since(f.time, 30));
     }
     // Final glide to the nearest known landing field.
-    Site? best;
+    final st = Settings.instance;
+    LandingField? best;
     var bestD = double.infinity;
-    for (final s in AppState.instance.sites) {
-      if (s.landingLat == null) continue;
-      final d = distanceM(f.lat, f.lon, s.landingLat!, s.landingLon!);
+    for (final l in AppState.instance.landings) {
+      final d = distanceM(f.lat, f.lon, l.lat, l.lon);
       if (d < bestD) {
         bestD = d;
-        best = s;
+        best = l;
       }
     }
-    landingSite = bestD < 40000 ? best : null;
-    finalGlideToLanding = landingSite == null
+    landing = bestD < 40000 ? best : null;
+    finalGlideToLanding = landing == null
         ? null
         : finalGlide(
             lat: f.lat, lon: f.lon, altM: f.altM,
-            goalLat: landingSite!.landingLat!, goalLon: landingSite!.landingLon!,
-            goalElevationM: landingSite!.landingElevationM ?? 0,
+            goalLat: landing!.lat, goalLon: landing!.lon, goalElevationM: landing!.elevationM,
             windFromDeg: wind?.fromDeg ?? 0, windKmh: wind?.speedKmh ?? 0,
+            polar: st.polar, safetyM: st.safetyMarginM,
           );
   }
 

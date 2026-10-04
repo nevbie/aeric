@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'services/airspace_store.dart';
 import 'services/app_state.dart';
 import 'services/logbook.dart';
+import 'services/settings.dart';
+import 'services/task_store.dart';
 import 'ui/common.dart';
 import 'ui/flight_screen.dart';
 import 'ui/fly_screen.dart';
@@ -11,8 +14,11 @@ import 'ui/thermal_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  Settings.instance.load();
   AppState.instance.loadFavourites();
   Logbook.instance.load();
+  AirspaceStore.instance.load();
+  TaskStore.instance.load();
   runApp(const AericApp());
   AppState.instance.refreshForecasts();
 }
@@ -23,7 +29,7 @@ class AericApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     ThemeData theme(Brightness b) =>
-        ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: aericBlue, brightness: b), useMaterial3: true);
+        ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: aericOrange, brightness: b), useMaterial3: true);
     return MaterialApp(
       title: 'aeric',
       debugShowCheckedModeBanner: false,

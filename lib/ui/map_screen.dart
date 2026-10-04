@@ -9,10 +9,14 @@ import '../core/flyability.dart';
 import '../core/site.dart';
 import '../core/thermal_grid.dart';
 import '../core/solar.dart';
+import '../core/task/task.dart';
 import '../core/thermal_model.dart';
 import '../services/app_state.dart';
+import '../services/airspace_store.dart';
 import '../services/logbook.dart';
+import '../services/task_store.dart';
 import 'common.dart';
+import 'place_editor.dart';
 
 /// Topographic base map with relief; fine for personal use, attribution required.
 const topoTiles = 'https://tile.opentopomap.org/{z}/{x}/{y}.png';
@@ -53,6 +57,7 @@ class _MapScreenState extends State<MapScreen> {
   /// Thermals from the logbook; [matchToday] highlights those flown in conditions like the
   /// forecast for the selected day/hour.
   bool showMine = true;
+  bool showAirspace = true;
   bool matchToday = true;
   bool _requested = false;
 
@@ -60,6 +65,7 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     Logbook.instance.load();
+    AirspaceStore.instance.load();
   }
 
   DateTime get _when => hour == 0
@@ -187,7 +193,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([AppState.instance, Logbook.instance]),
+        listenable: Listenable.merge([AppState.instance, Logbook.instance, AirspaceStore.instance, TaskStore.instance]),
         builder: (context, _) => _build(context),
       );
 
@@ -200,7 +206,11 @@ class _MapScreenState extends State<MapScreen> {
     return Stack(children: [
       FlutterMap(
         mapController: _map,
-        options: MapOptions(initialCenter: LatLng(lat, lon), initialZoom: 9.5),
+        options: MapOptions(
+          initialCenter: LatLng(lat, lon),
+          initialZoom: 9.5,
+          onLongPress: (_, p) => showPlaceEditor(context, p.latitude, p.longitude),
+        ),
         children: [
           if (_tiles) TileLayer(urlTemplate: topoTiles, userAgentPackageName: 'com.nevbie.aeric', maxNativeZoom: 17),
           if (_tiles && showSkyways)
@@ -213,6 +223,16 @@ class _MapScreenState extends State<MapScreen> {
               opacity: 0.8,
               child: TileLayer(urlTemplate: kk7Tiles(_kk7('thermals')), tms: true, maxNativeZoom: 12, userAgentPackageName: 'com.nevbie.aeric'),
             ),
+          if (showAirspace && AirspaceStore.instance.airspaces.isNotEmpty)
+            PolygonLayer(polygons: [
+              for (final a in AirspaceStore.instance.airspaces)
+                Polygon(
+                  points: [for (final (la, lo) in a.polygon) LatLng(la, lo)],
+                  color: airspaceColor(a.cls).withValues(alpha: 0.08),
+                  borderColor: airspaceColor(a.cls),
+                  borderStrokeWidth: 1.2,
+                ),
+            ]),
           if (showMine && Logbook.instance.entries.isNotEmpty)
             Builder(builder: (context) {
               final ref = matchToday ? _referenceCondition()?.$1 : null;
@@ -238,7 +258,44 @@ class _MapScreenState extends State<MapScreen> {
                     color: climbColor(v.climbMs).withValues(alpha: 0.45),
                   ),
             ]),
+          if (TaskStore.instance.task case final task?) ...[
+            CircleLayer(circles: [
+              for (final tp in task.turnpoints)
+                CircleMarker(
+                  point: LatLng(tp.lat, tp.lon),
+                  radius: tp.radiusM,
+                  useRadiusInMeter: true,
+                  color: const Color(0x1A7B1FA2),
+                  borderColor: const Color(0xFF7B1FA2),
+                  borderStrokeWidth: 2,
+                ),
+            ]),
+            PolylineLayer(polylines: [
+              Polyline(
+                points: () {
+                  final tps = task.turnpoints;
+                  final from = tps.indexWhere((t) => t.type.name != 'takeoff');
+                  final first = tps[from < 0 ? 0 : from];
+                  final r = optimiseRoute(first.lat, first.lon, tps.sublist((from < 0 ? 0 : from) + 1),
+                      goalLine: task.goalType == GoalType.line);
+                  return [LatLng(first.lat, first.lon), for (final (a, b) in r.points) LatLng(a, b)];
+                }(),
+                color: const Color(0xFF7B1FA2),
+                strokeWidth: 3,
+              ),
+            ]),
+          ],
           MarkerLayer(markers: [
+            for (final l in app.landings)
+              Marker(
+                point: LatLng(l.lat, l.lon),
+                width: 22,
+                height: 22,
+                child: Tooltip(
+                  message: '${l.name} · ${l.elevationM.round()} m',
+                  child: const Icon(Icons.flag, size: 20, color: Color(0xFF1565C0)),
+                ),
+              ),
             for (final s in app.sites)
               Marker(point: LatLng(s.lat, s.lon), width: 26, height: 26, child: _siteMarker(s)),
           ]),
@@ -281,6 +338,16 @@ class _MapScreenState extends State<MapScreen> {
               tooltip: 'Thermal hotspots from historical flights (thermal.kk7.ch)',
               selected: showHotspots,
               onSelected: (v) => setState(() => showHotspots = v),
+            ),
+            const SizedBox(width: 6),
+            FilterChip(
+              avatar: const Icon(Icons.layers, size: 16),
+              label: const Text('Airspace'),
+              tooltip: AirspaceStore.instance.airspaces.isEmpty
+                  ? 'Import an OpenAIR airspace file in Settings'
+                  : '${AirspaceStore.instance.airspaces.length} airspaces',
+              selected: showAirspace && AirspaceStore.instance.airspaces.isNotEmpty,
+              onSelected: (v) => setState(() => showAirspace = v),
             ),
             const SizedBox(width: 6),
             FilterChip(
@@ -384,7 +451,7 @@ class _MapScreenState extends State<MapScreen> {
               Text(
                 'Heatmap: estimated paraglider climb (aeric thermal model, Open-Meteo forecast). '
                 '${showHotspots || showSkyways ? 'Hotspots/skyways: thermal.kk7.ch (XContest flights), non-commercial use. ' : ''}'
-                'Markers: best window of the day, gold ring = favourite. 🔍 loads the heatmap for the visible area.',
+                'Markers: best window of the day, gold ring = favourite, blue flags = landings. Long-press to add your own takeoff or landing. 🔍 loads the heatmap for the visible area.',
                 style: small?.copyWith(fontSize: 11),
               ),
             ]),

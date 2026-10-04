@@ -6,6 +6,9 @@ import '../core/thermal_model.dart';
 import '../services/app_state.dart';
 
 const aericBlue = Color(0xFF1E88E5);
+
+/// Brand colour (logo orange).
+const aericOrange = Color(0xFFF57C00);
 const goColor = Color(0xFF2E7D32);
 const marginalColor = Color(0xFFF9A825);
 const noGoColor = Color(0xFFC62828);
@@ -81,3 +84,11 @@ class FavouriteButton extends StatelessWidget {
     );
   }
 }
+
+/// Map colour of an airspace class: red for no-go (CTR, restricted, prohibited, C, D),
+/// orange for danger areas, blue for the rest.
+Color airspaceColor(String cls) => switch (cls) {
+      'CTR' || 'R' || 'P' || 'A' || 'B' || 'C' || 'D' => noGoColor,
+      'Q' || 'DANGER' => const Color(0xFFEF6C00),
+      _ => const Color(0xFF0288D1),
+    };
