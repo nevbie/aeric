@@ -3,18 +3,23 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../core/day_planner.dart';
+import '../core/flight/thermal_conditions.dart';
+import '../core/geo.dart';
 import '../core/flyability.dart';
 import '../core/site.dart';
 import '../core/thermal_grid.dart';
+import '../core/solar.dart';
 import '../core/thermal_model.dart';
 import '../services/app_state.dart';
+import '../services/logbook.dart';
 import 'common.dart';
 
 /// Topographic base map with relief; fine for personal use, attribution required.
 const topoTiles = 'https://tile.opentopomap.org/{z}/{x}/{y}.png';
 
 /// Historical thermal maps from thermal.kk7.ch, computed from XContest flights (non-commercial use).
-String kk7Tiles(String layer) => 'https://thermal.kk7.ch/tiles/${layer}_all_all/{z}/{x}/{y}.png?src=aeric';
+/// [layer] is e.g. `thermals_all_all` or the seasonal `thermals_jul_07`.
+String kk7Tiles(String layer) => 'https://thermal.kk7.ch/tiles/$layer/{z}/{x}/{y}.png?src=aeric';
 
 /// "Thermik-Karte": forecast thermal heatmap, historical hotspots/skyways and the takeoffs.
 class MapScreen extends StatefulWidget {
@@ -41,7 +46,51 @@ class _MapScreenState extends State<MapScreen> {
   bool showThermals = true;
   bool showHotspots = false;
   bool showSkyways = false;
+
+  /// kk7 layers for this season and time of day instead of all-year.
+  bool kk7Seasonal = true;
+
+  /// Thermals from the logbook; [matchToday] highlights those flown in conditions like the
+  /// forecast for the selected day/hour.
+  bool showMine = true;
+  bool matchToday = true;
   bool _requested = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Logbook.instance.load();
+  }
+
+  DateTime get _when => hour == 0
+      ? DateTime(day.year, day.month, day.day, dayOffset == 0 ? DateTime.now().hour.clamp(10, 18) : 13)
+      : DateTime(day.year, day.month, day.day, hour);
+
+  String _kk7(String type) {
+    if (!kk7Seasonal) return '${type}_all_all';
+    final c = _map.camera.center;
+    final sunrise = sunriseHourLocal(c.latitude, c.longitude, _when, DateTime.now().timeZoneOffset.inSeconds) ?? 6.5;
+    return kk7Layer(type, _when, sunriseHour: sunrise);
+  }
+
+  /// Forecast weather at the selected time, from the favourite site nearest to the map centre.
+  (WeatherCondition, Site)? _referenceCondition() {
+    final c = _map.camera.center;
+    (WeatherCondition, Site)? best;
+    var bestD = double.infinity;
+    for (final s in app.sites) {
+      final f = app.forecasts[s.id];
+      if (f == null) continue;
+      final d = (s.lat - c.latitude).abs() + (s.lon - c.longitude).abs();
+      if (d >= bestD) continue;
+      final w = _when;
+      final h = f.where((x) => x.time == DateTime(w.year, w.month, w.day, w.hour)).firstOrNull;
+      if (h == null) continue;
+      bestD = d;
+      best = (WeatherCondition.of(h), s);
+    }
+    return best;
+  }
 
   bool get _tiles => widget.showTiles ?? MapScreen.tilesEnabled;
 
@@ -137,7 +186,12 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge([AppState.instance, Logbook.instance]),
+        builder: (context, _) => _build(context),
+      );
+
+  Widget _build(BuildContext context) {
     _ensureGrid();
     final grid = app.grid;
     final (lat, lon) = AppState.defaultMapCenter;
@@ -152,13 +206,29 @@ class _MapScreenState extends State<MapScreen> {
           if (_tiles && showSkyways)
             Opacity(
               opacity: 0.75,
-              child: TileLayer(urlTemplate: kk7Tiles('skyways'), tms: true, maxNativeZoom: 12, userAgentPackageName: 'com.nevbie.aeric'),
+              child: TileLayer(urlTemplate: kk7Tiles(_kk7('skyways')), tms: true, maxNativeZoom: 12, userAgentPackageName: 'com.nevbie.aeric'),
             ),
           if (_tiles && showHotspots)
             Opacity(
               opacity: 0.8,
-              child: TileLayer(urlTemplate: kk7Tiles('thermals'), tms: true, maxNativeZoom: 12, userAgentPackageName: 'com.nevbie.aeric'),
+              child: TileLayer(urlTemplate: kk7Tiles(_kk7('thermals')), tms: true, maxNativeZoom: 12, userAgentPackageName: 'com.nevbie.aeric'),
             ),
+          if (showMine && Logbook.instance.entries.isNotEmpty)
+            Builder(builder: (context) {
+              final ref = matchToday ? _referenceCondition()?.$1 : null;
+              final spots = conditionalHotspots(Logbook.instance.allThermals, reference: ref);
+              return CircleLayer(circles: [
+                for (final h in spots)
+                  CircleMarker(
+                    point: LatLng(h.lat, h.lon),
+                    radius: 120.0 + 50.0 * (h.count - 1).clamp(0, 8),
+                    useRadiusInMeter: true,
+                    color: (h.matching.isEmpty ? Colors.grey : climbColor(h.avgClimbMs)).withValues(alpha: h.matching.isEmpty ? 0.2 : 0.5),
+                    borderColor: h.matching.isEmpty ? Colors.grey : Colors.white,
+                    borderStrokeWidth: 1.5,
+                  ),
+              ]);
+            }),
           if (showThermals && grid != null)
             PolygonLayer(polygons: [
               for (final c in grid.cells)
@@ -211,6 +281,30 @@ class _MapScreenState extends State<MapScreen> {
               tooltip: 'Thermal hotspots from historical flights (thermal.kk7.ch)',
               selected: showHotspots,
               onSelected: (v) => setState(() => showHotspots = v),
+            ),
+            const SizedBox(width: 6),
+            FilterChip(
+              avatar: const Icon(Icons.person_pin_circle, size: 16),
+              label: const Text('My thermals'),
+              tooltip: 'Thermals from your logbook flights',
+              selected: showMine,
+              onSelected: (v) => setState(() => showMine = v),
+            ),
+            const SizedBox(width: 6),
+            FilterChip(
+              avatar: const Icon(Icons.air, size: 16),
+              label: const Text('Like today'),
+              tooltip: 'Highlight thermals flown in weather like the forecast (wind, cloud)',
+              selected: matchToday,
+              onSelected: (v) => setState(() => matchToday = v),
+            ),
+            const SizedBox(width: 6),
+            FilterChip(
+              avatar: const Icon(Icons.calendar_month, size: 16),
+              label: const Text('Season & time'),
+              tooltip: 'kk7 layers for this season and time of day instead of the whole year',
+              selected: kk7Seasonal,
+              onSelected: (v) => setState(() => kk7Seasonal = v),
             ),
             const SizedBox(width: 6),
             FilterChip(
@@ -272,6 +366,20 @@ class _MapScreenState extends State<MapScreen> {
                     Text(label, style: const TextStyle(fontSize: 11)),
                   ]),
               ]),
+              if (showMine && matchToday && Logbook.instance.entries.isNotEmpty)
+                Builder(builder: (context) {
+                  final ref = _referenceCondition();
+                  final spots = conditionalHotspots(Logbook.instance.allThermals, reference: ref?.$1);
+                  final n = spots.where((h) => h.matching.isNotEmpty).length;
+                  return Text(
+                    ref == null
+                        ? 'My thermals: ${spots.length} spots (no forecast for comparison yet)'
+                        : 'My thermals: $n of ${spots.length} spots were flown in weather like ${hhmm(_when)} '
+                            '(wind ${ref.$1.windKmh.round()} km/h ${compass(ref.$1.windFromDeg)}'
+                            '${ref.$1.cloudCover == null ? '' : ', ☁${ref.$1.cloudCover!.round()} %'}, ${ref.$2.name.split(' (').first})',
+                    style: small?.copyWith(fontSize: 11),
+                  );
+                }),
               if (app.gridError case final e?) Text(e, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
               Text(
                 'Heatmap: estimated paraglider climb (aeric thermal model, Open-Meteo forecast). '

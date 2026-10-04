@@ -53,7 +53,12 @@ class _ThermalScreenState extends State<ThermalScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: AppState.instance,
+        builder: (context, _) => _build(context),
+      );
+
+  Widget _build(BuildContext context) {
     final hours = app.forecasts[site.id];
     final clim = app.climatologies[site.id];
     final report = hours == null

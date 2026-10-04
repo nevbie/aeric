@@ -20,7 +20,12 @@ class _FlyScreenState extends State<FlyScreen> {
   bool favouritesOnly = true;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: AppState.instance,
+        builder: (context, _) => _build(context),
+      );
+
+  Widget _build(BuildContext context) {
     final app = AppState.instance;
     final now = DateTime.now();
     final days = [for (var i = 0; i < 3; i++) DateTime(now.year, now.month, now.day + i)];

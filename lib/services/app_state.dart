@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/elevation.dart';
 import '../core/historical_weather.dart';
 import '../core/open_meteo.dart';
 import '../core/sample_sites.dart';
@@ -19,9 +20,16 @@ class AppState extends ChangeNotifier {
 
   AppState._(this._get, Future<Directory> Function()? cacheDir)
       : _forecast = OpenMeteoClient(_get),
+        elevation = ElevationClient(_get),
         _history = HistoricalWeatherClient(
           diskCached(_get, cacheDir ?? () async => Directory('${(await getApplicationCacheDirectory()).path}/archive')),
         );
+
+  /// Terrain height for height above ground.
+  final ElevationClient elevation;
+
+  /// Historical weather (cached on disk) – also used to tag logbook thermals with their conditions.
+  HistoricalWeatherClient get history => _history;
 
   static final instance = AppState();
 

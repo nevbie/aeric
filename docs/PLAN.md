@@ -81,6 +81,40 @@ Effort is in **person-weeks for one experienced Flutter developer**. Feasibility
 | I2 | Audio callouts (altitude, glide, airspace, task) | High | 0.5–1 | `flutter_tts`, mixed with the vario tones. |
 | I3 | Watch apps (Garmin, Apple Watch) | Low/Medium | 4–8 each | Neither can be written in Flutter: Garmin needs Connect IQ (Monkey C), Apple Watch needs native SwiftUI + WatchConnectivity. Do this last. |
 
+## Thermal spots by weather condition (research, Oct 2026)
+
+**Question:** can historical XContest flights be combined with historical weather to find out where
+thermals are under which conditions (e.g. "with a westerly wind the Merkur house thermal is behind
+the tower")?
+
+**XContest:** there is no public API for tracklogs. You can download **your own** flights as a ZIP
+of IGC files; other pilots' tracks are only available one by one on the website. Bulk download or
+scraping needs XContest's permission. Their statement that uploaded tracklogs become "public
+property" does not grant automated access to the site.
+
+**kk7 (thermal.kk7.ch)** already aggregates XContest flights into thermal-probability tiles, filtered
+by **season** (`jan`/`apr`/`jul`/`oct` ±1.5 months) and **time of day** (morning/midday/evening after
+sunrise, `04`/`07`/`10`). aeric uses these filters automatically. kk7 does **not** filter by weather
+(wind direction, cloud), and the tiles are for non-commercial use only.
+
+**What aeric does now (v0.2):** for every flight in the logbook (recorded or imported IGC):
+- detect the thermals (circling ≥ 300° in 30 s while climbing ≥ 0.5 m/s)
+- fetch the hourly ERA5 weather for that day and place (Open-Meteo archive, cached; forecast API
+  for the last days)
+- tag each thermal with wind direction and speed, cloud cover and temperature
+- on the map, cluster the thermals into hotspots and highlight those that were flown in weather
+  like the forecast for the chosen day and hour
+
+**To scale it beyond one's own flights:**
+1. Ask XContest (or kk7, whose author did thermal research based on XContest data) for
+   research or app access to tracklogs by region. With ~1000 flights per site this becomes a real
+   "thermal map by wind direction".
+2. Club flights: pilots of a club import their IGC ZIPs and share the derived thermal list (not
+   the tracks). This needs a small backend, the same one as live tracking (S2).
+3. Better conditions: add 850 hPa wind (ridge-top wind) and the sun angle on the slope (aspect
+   from the DEM) to the matcher. Thermals mostly trigger on sun-facing slopes on the lee side of
+   the valley wind.
+
 ## Recommended order
 
 Most in-flight logic is **pure maths** and can go into `lib/core/` with unit tests, like the
@@ -88,7 +122,7 @@ thermal model. That includes the vario filter, wind from circling, L/D and final
 writer, OpenAIR parser, XCTrack task parser and route optimisation. It can be built and tested
 before anyone flies with it.
 
-1. **v0.2 Fly with it** (≈ 8–10 weeks): F2, F1 (phone barometer + tones), F4, F5, S4, A1 (recording
+1. **v0.2 Fly with it** (in progress, see README; still missing: QNH setting, signed IGC, field testing) (≈ 8–10 weeks): F2, F1 (phone barometer + tones), F4, F5, S4, A1 (recording
    + logbook, unsigned), a simple fixed instrument screen, I2. Track export as IGC/KML (part of A2).
 2. **v0.3 XC** (≈ 8–10 weeks): S1 airspace, F3 thermal assistant, N1–N4 tasks with QR import and the
    optimised route, F6 customisable screens, I1 Bluetooth varios.

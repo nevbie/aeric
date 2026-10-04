@@ -29,6 +29,8 @@ class Site {
     required this.lon,
     required this.takeoffElevationM,
     this.landingElevationM,
+    this.landingLat,
+    this.landingLon,
     required this.sectors,
     this.minWindKmh = 0,
     this.maxWindKmh = 25,
@@ -41,6 +43,10 @@ class Site {
   final double lon;
   final double takeoffElevationM;
   final double? landingElevationM;
+
+  /// Official landing field, when known (used for final glide).
+  final double? landingLat;
+  final double? landingLon;
   final List<WindSector> sectors;
 
   /// Below this the site is still launchable, but not soarable.
