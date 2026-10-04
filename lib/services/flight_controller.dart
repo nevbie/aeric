@@ -18,8 +18,10 @@ import '../core/flight/igc.dart';
 import '../core/flight/vario.dart';
 import '../core/flight/wind.dart';
 import '../core/landing.dart';
+import '../core/devices/vario_protocols.dart';
 import 'airspace_store.dart';
 import 'app_state.dart';
+import 'ble_vario.dart';
 import 'logbook.dart';
 import 'settings.dart';
 import 'vario_audio.dart';
@@ -77,6 +79,16 @@ class FlightController extends ChangeNotifier {
   final List<(DateTime, double)> _qnhSamples = [];
   StreamSubscription<Position>? _gpsSub;
   StreamSubscription<BarometerEvent>? _baroSub;
+  StreamSubscription<VarioSample>? _bleSub;
+  DateTime? _lastExternalPressure;
+  DateTime? _lastPhoneFix;
+
+  /// Where the vario comes from: Bluetooth device, phone barometer or GPS.
+  String get varioSource {
+    final ble = BleVario.instance;
+    if (_lastExternalPressure != null && ble.connected) return ble.deviceName ?? 'Bluetooth vario';
+    return hasBarometer ? 'phone barometer' : 'GPS altitude';
+  }
   Timer? _replayTimer;
   DateTime? _lastElevationAt;
   DateTime? _groundSince;
@@ -132,10 +144,13 @@ class FlightController extends ChangeNotifier {
             showBackgroundLocationIndicator: true,
           );
     _gpsSub = Geolocator.getPositionStream(locationSettings: settings).listen(
-      (p) => onPosition(
-        Fix(time: DateTime.now().toUtc(), lat: p.latitude, lon: p.longitude, gpsAltM: p.altitude, baroAltM: baroAltM),
-        speedKmh: p.speed >= 0 ? p.speed * 3.6 : null,
-      ),
+      (p) {
+        _lastPhoneFix = DateTime.now().toUtc();
+        onPosition(
+          Fix(time: _lastPhoneFix!, lat: p.latitude, lon: p.longitude, gpsAltM: p.altitude, baroAltM: baroAltM),
+          speedKmh: p.speed >= 0 ? p.speed * 3.6 : null,
+        );
+      },
       onError: (Object e) {
         error = 'GPS: $e';
         notifyListeners();
@@ -146,8 +161,26 @@ class FlightController extends ChangeNotifier {
       onError: (Object _) => hasBarometer = false, // fall back to a GPS-altitude vario
       cancelOnError: true,
     );
+    _bleSub = BleVario.instance.samples.listen(onExternal);
+    BleVario.instance.reconnect().ignore();
     _applyAudioSettings();
     await audio.start(() => varioMs);
+  }
+
+  /// A reading from a Bluetooth vario: its pressure replaces the phone barometer; its GPS is
+  /// used when the phone has no fix.
+  void onExternal(VarioSample s, {DateTime? at}) {
+    final now = at ?? DateTime.now().toUtc();
+    if (s.pressureHpa != null) {
+      onPressure(now, s.pressureHpa!, external: true);
+    } else if (s.baroAltM != null) {
+      onPressure(now, 1013.25 * math.pow(1 - s.baroAltM! / 44330.77, 1 / 0.190263), external: true);
+    }
+    final phoneStale = _lastPhoneFix == null || now.difference(_lastPhoneFix!).inSeconds > 3;
+    if (s.hasPosition && phoneStale) {
+      onPosition(Fix(time: now, lat: s.lat!, lon: s.lon!, gpsAltM: s.gpsAltM ?? fix?.gpsAltM ?? 0, baroAltM: baroAltM),
+          speedKmh: s.groundSpeedKmh);
+    }
   }
 
   void _applyAudioSettings() {
@@ -158,6 +191,8 @@ class FlightController extends ChangeNotifier {
   Future<void> stop() async {
     await _gpsSub?.cancel();
     await _baroSub?.cancel();
+    await _bleSub?.cancel();
+    _bleSub = null;
     _gpsSub = null;
     _baroSub = null;
     _replayTimer?.cancel();
@@ -224,10 +259,18 @@ class FlightController extends ChangeNotifier {
     thermalGainM = null;
     airspaceWarnings = const [];
     _announced.clear();
+    _lastExternalPressure = null;
+    _lastPhoneFix = null;
   }
 
   /// Barometer sample. Altitude is calibrated (QNH) against the first GPS fixes.
-  void onPressure(DateTime t, double hPa) {
+  void onPressure(DateTime t, double hPa, {bool external = false}) {
+    // A connected Bluetooth vario wins over the phone's barometer.
+    if (external) {
+      _lastExternalPressure = t;
+    } else if (_lastExternalPressure != null && t.difference(_lastExternalPressure!).inSeconds.abs() < 3) {
+      return;
+    }
     hasBarometer = true;
     if (_qnh == null) {
       _qnhSamples.add((t, hPa));

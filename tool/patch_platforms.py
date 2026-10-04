@@ -21,6 +21,9 @@ if manifest.exists():
         "android.permission.WAKE_LOCK",
         # Barometer at more than 200 Hz is not needed, but some devices gate fast sensors.
         "android.permission.HIGH_SAMPLING_RATE_SENSORS",
+        # Bluetooth varios.
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
     ]
     add = "".join(f'    <uses-permission android:name="{p}"/>\n' for p in perms if p not in m)
     m = re.sub(r"(<manifest[^>]*>\n)", lambda g: g.group(1) + add, m, count=1)
@@ -83,10 +86,11 @@ if plist.exists():
         "NSLocationWhenInUseUsageDescription": "aeric uses your location for the flight instruments and to record your flights.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "aeric keeps recording your flight and the vario running when the screen is off.",
         "NSMotionUsageDescription": "aeric uses the barometer (altimeter) for the variometer.",
+        "NSBluetoothAlwaysUsageDescription": "aeric connects to your Bluetooth vario (XC Tracer, Skytraxx, FlyMaster …).",
     }
     extra = "".join(f"\t<key>{k}</key>\n\t<string>{v}</string>\n" for k, v in entries.items() if k not in s)
     if "UIBackgroundModes" not in s:
-        extra += "\t<key>UIBackgroundModes</key>\n\t<array>\n\t\t<string>location</string>\n\t\t<string>audio</string>\n\t</array>\n"
+        extra += "\t<key>UIBackgroundModes</key>\n\t<array>\n\t\t<string>location</string>\n\t\t<string>audio</string>\n\t\t<string>bluetooth-central</string>\n\t</array>\n"
     idx = s.rfind("</dict>")
     s = s[:idx] + extra + s[idx:]
     plist.write_text(s)

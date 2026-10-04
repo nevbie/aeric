@@ -5,7 +5,9 @@ import 'dart:typed_data';
 
 import 'package:aeric/core/flight/igc.dart';
 import 'package:aeric/core/airspace.dart';
+import 'package:aeric/core/flight/fix.dart';
 import 'package:aeric/services/airspace_store.dart';
+import 'package:aeric/core/devices/vario_protocols.dart';
 import 'package:aeric/services/flight_controller.dart';
 import 'package:aeric/services/logbook.dart';
 import 'package:archive/archive.dart';
@@ -102,5 +104,21 @@ void main() {
     }
     expect(fc.airspaceWarnings, isNotEmpty);
     expect(fc.airspaceWarnings.first.level, AirspaceLevel.inside);
+  });
+
+  test('a Bluetooth vario overrides the phone barometer', () {
+    final fc = FlightController.instance..reset();
+    final t0 = DateTime.now().toUtc();
+    double hpa(double alt) => 1013.25 * math.pow(1 - alt / 44330.77, 1 / 0.190263);
+    // Phone barometer says level at 1000 m, BLE vario says climbing 2 m/s.
+    for (var i = 0; i < 30; i++) {
+      final t = t0.add(Duration(seconds: i));
+      fc.onExternal(VarioSample(pressureHpa: hpa(1000 + 2.0 * i), source: 'LK8EX1'), at: t);
+      fc.onPressure(t, hpa(1000), external: false);
+      fc.onPosition(Fix(time: t, lat: 48.6, lon: 8.2, gpsAltM: 1000));
+    }
+    expect(fc.hasBarometer, isTrue);
+    // Phone samples within 3 s of an external one are ignored.
+    expect(fc.varioMs, closeTo(2.0, 0.3));
   });
 }

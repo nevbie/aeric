@@ -143,7 +143,7 @@ void main() {
 
     await tester.tap(find.text('Flight'));
     await tester.pump();
-    expect(find.text('Vario'), findsOneWidget);
+    expect(find.textContaining('Vario ·'), findsOneWidget);
     expect(find.text('Start flight'), findsOneWidget);
     expect(find.text('Needed L/D'), findsOneWidget);
 

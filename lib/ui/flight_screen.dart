@@ -24,7 +24,7 @@ class FlightScreen extends StatelessWidget {
         final w = fc.wind;
         return Column(children: [
           if (fc.airspaceWarnings.isNotEmpty) _AirspaceBanner(fc.airspaceWarnings),
-          _VarioPanel(fc.varioMs, fc.avg30Ms, fc.thermalAvgMs, fc.thermalGainM),
+          _VarioPanel(fc.varioMs, fc.avg30Ms, fc.thermalAvgMs, fc.thermalGainM, fc.varioSource),
           Expanded(
             child: GridView.count(
               crossAxisCount: 3,
@@ -146,8 +146,9 @@ class _AirspaceBanner extends StatelessWidget {
 }
 
 class _VarioPanel extends StatelessWidget {
-  const _VarioPanel(this.v, this.avg, this.thermalAvg, this.thermalGain);
+  const _VarioPanel(this.v, this.avg, this.thermalAvg, this.thermalGain, this.source);
   final double v;
+  final String source;
   final double? avg;
   final double? thermalAvg;
   final double? thermalGain;
@@ -172,7 +173,7 @@ class _VarioPanel extends StatelessWidget {
         const SizedBox(width: 16),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Vario', style: Theme.of(context).textTheme.labelMedium),
+            Text('Vario · $source', style: Theme.of(context).textTheme.labelMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
             Text(
               '${v >= 0 ? '+' : '−'}${v.abs().toStringAsFixed(1)}',
               style: TextStyle(fontSize: 64, fontWeight: FontWeight.w800, color: color, height: 1.0),

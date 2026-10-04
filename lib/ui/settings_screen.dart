@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../services/airspace_store.dart';
 import '../services/app_state.dart';
+import '../services/ble_vario.dart';
 import '../services/settings.dart';
 
 /// Pilot, glider, final glide, vario sound and altimeter settings; own sites.
@@ -62,7 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListenableBuilder(
-        listenable: Listenable.merge([st, app, AirspaceStore.instance]),
+        listenable: Listenable.merge([st, app, AirspaceStore.instance, BleVario.instance]),
         builder: (context, _) => ListView(children: [
           const _Header('Pilot (written into recorded IGC files)'),
           Padding(
@@ -111,6 +112,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
           ),
+          const _Header('Bluetooth vario'),
+          _BleSection(BleVario.instance),
           const _Header('Airspace (OpenAIR)'),
           ListTile(
             title: Text(AirspaceStore.instance.airspaces.isEmpty
@@ -176,3 +179,50 @@ class _Header extends StatelessWidget {
 
 void openSettings(BuildContext context) =>
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+
+class _BleSection extends StatelessWidget {
+  const _BleSection(this.ble);
+  final BleVario ble;
+
+  @override
+  Widget build(BuildContext context) {
+    final last = ble.last;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(switch (ble.state) {
+          BleState.connected => 'Connected: ${ble.deviceName}',
+          BleState.connecting => 'Connecting to ${ble.deviceName} …',
+          BleState.scanning => 'Searching … (switch the vario on and its Bluetooth/BLE output to LK8EX1 or similar)',
+          BleState.error => ble.error ?? 'Error',
+          BleState.idle => 'XC Tracer, Skytraxx, FlyMaster, BlueFly, OpenVario … – fast, accurate pressure for the vario',
+        }),
+        if (ble.connected && last != null)
+          Text(
+            '${ble.sentences.entries.map((e) => '${e.key} ×${e.value}').join(', ')}'
+            '${last.pressureHpa == null ? '' : ' · ${last.pressureHpa!.toStringAsFixed(2)} hPa'}'
+            '${last.batteryPct == null ? '' : ' · battery ${last.batteryPct!.round()} %'}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        Wrap(spacing: 8, children: [
+          if (!ble.connected)
+            FilledButton.tonalIcon(
+              onPressed: ble.state == BleState.scanning ? null : ble.scan,
+              icon: const Icon(Icons.bluetooth_searching),
+              label: const Text('Search'),
+            ),
+          if (ble.connected || ble.state == BleState.error)
+            TextButton(onPressed: () => ble.disconnect(forget: true), child: const Text('Disconnect')),
+        ]),
+        for (final d in ble.devices.values)
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.bluetooth),
+            title: Text(d.name ?? d.deviceId),
+            subtitle: d.rssi == null ? null : Text('${d.rssi} dBm'),
+            onTap: () => ble.connect(d.deviceId, name: d.name),
+          ),
+      ]),
+    );
+  }
+}
