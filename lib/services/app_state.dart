@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/elevation.dart';
 import '../core/historical_weather.dart';
+import '../core/landing.dart';
 import '../core/open_meteo.dart';
 import '../core/sample_sites.dart';
 import '../core/site.dart';
@@ -41,7 +43,48 @@ class AppState extends ChangeNotifier {
   final OpenMeteoClient _forecast;
   final HistoricalWeatherClient _history;
 
-  final List<Site> sites = sampleSites;
+  /// Built-in sites plus the pilot's own takeoffs.
+  final List<Site> sites = [...sampleSites];
+
+  /// Built-in landing fields plus the pilot's own.
+  final List<LandingField> landings = [...landingFields];
+
+  static const _userSitesKey = 'userSites';
+  static const _userLandingsKey = 'userLandings';
+
+  Future<void> addUserSite(Site s) async {
+    sites.add(s);
+    favourites.add(s.id);
+    notifyListeners();
+    await _saveUserPlaces();
+    await _prefs?.setStringList(_favouritesKey, favourites.toList());
+  }
+
+  Future<void> addUserLanding(LandingField l) async {
+    landings.add(l);
+    notifyListeners();
+    await _saveUserPlaces();
+  }
+
+  Future<void> removeUserSite(Site s) async {
+    sites.removeWhere((x) => x.id == s.id);
+    favourites.remove(s.id);
+    forecasts.remove(s.id);
+    if (thermalSiteId == s.id) thermalSiteId = null;
+    notifyListeners();
+    await _saveUserPlaces();
+  }
+
+  Future<void> removeUserLanding(LandingField l) async {
+    landings.removeWhere((x) => x.id == l.id);
+    notifyListeners();
+    await _saveUserPlaces();
+  }
+
+  Future<void> _saveUserPlaces() async {
+    await _prefs?.setString(_userSitesKey, jsonEncode([for (final s in sites.where((s) => s.userDefined)) s.toJson()]));
+    await _prefs?.setString(_userLandingsKey, jsonEncode([for (final l in landings.where((l) => l.userDefined)) l.toJson()]));
+  }
 
   Site siteById(String id) => sites.firstWhere((s) => s.id == id);
 
@@ -70,6 +113,18 @@ class AppState extends ChangeNotifier {
   Future<void> loadFavourites() async {
     try {
       _prefs = await SharedPreferences.getInstance();
+      final userSites = _prefs!.getString(_userSitesKey);
+      if (userSites != null) {
+        sites
+          ..removeWhere((s) => s.userDefined)
+          ..addAll((jsonDecode(userSites) as List).cast<Map<String, dynamic>>().map(Site.fromJson));
+      }
+      final userLandings = _prefs!.getString(_userLandingsKey);
+      if (userLandings != null) {
+        landings
+          ..removeWhere((l) => l.userDefined)
+          ..addAll((jsonDecode(userLandings) as List).cast<Map<String, dynamic>>().map(LandingField.fromJson));
+      }
       final saved = _prefs!.getStringList(_favouritesKey);
       if (saved != null) favourites = saved.where((id) => sites.any((s) => s.id == id)).toSet();
     } catch (e) {

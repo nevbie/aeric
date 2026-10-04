@@ -16,9 +16,10 @@ import '../core/flight/glide.dart';
 import '../core/flight/igc.dart';
 import '../core/flight/vario.dart';
 import '../core/flight/wind.dart';
-import '../core/site.dart';
+import '../core/landing.dart';
 import 'app_state.dart';
 import 'logbook.dart';
+import 'settings.dart';
 import 'vario_audio.dart';
 
 enum FlightMode { idle, live, replay }
@@ -30,7 +31,7 @@ class FlightController extends ChangeNotifier {
 
   final audio = VarioAudio();
   late final _tts = FlutterTts(); // lazy: only created when something is spoken
-  bool voice = true;
+  bool get voice => Settings.instance.voice;
 
   FlightMode mode = FlightMode.idle;
   String? error;
@@ -46,7 +47,7 @@ class FlightController extends ChangeNotifier {
   WindEstimate? wind;
   double? glideRatio;
   FinalGlide? finalGlideToLanding;
-  Site? landingSite;
+  LandingField? landing;
   bool hasBarometer = false;
   bool flying = false;
   DateTime? takeoffTime;
@@ -83,7 +84,7 @@ class FlightController extends ChangeNotifier {
   }
 
   void toggleVoice() {
-    voice = !voice;
+    Settings.instance.update((s) => s.voice = !s.voice);
     notifyListeners();
   }
 
@@ -138,7 +139,13 @@ class FlightController extends ChangeNotifier {
       onError: (Object _) => hasBarometer = false, // fall back to a GPS-altitude vario
       cancelOnError: true,
     );
+    _applyAudioSettings();
     await audio.start(() => varioMs);
+  }
+
+  void _applyAudioSettings() {
+    audio.mapper = Settings.instance.toneMapper;
+    audio.volume = Settings.instance.volume;
   }
 
   Future<void> stop() async {
@@ -154,7 +161,8 @@ class FlightController extends ChangeNotifier {
     mode = FlightMode.idle;
     notifyListeners();
     if (wasLive && track.length > 30) {
-      await Logbook.instance.addIgc(writeIgc(track), source: 'recorded');
+      final st = Settings.instance;
+      await Logbook.instance.addIgc(writeIgc(track, pilot: st.pilot, glider: st.glider), source: 'recorded');
     }
   }
 
@@ -165,6 +173,7 @@ class FlightController extends ChangeNotifier {
     reset();
     mode = FlightMode.replay;
     notifyListeners();
+    _applyAudioSettings();
     await audio.start(() => varioMs);
     var i = 0;
     final fixes = flight.fixes;
@@ -223,7 +232,7 @@ class FlightController extends ChangeNotifier {
     // Calibrate the barometer once GPS altitude has settled (10 fixes), or right away in replay.
     if (_qnh == null && hasBarometer && _qnhSamples.isNotEmpty && (track.length >= 10 || mode == FlightMode.replay)) {
       final p = _qnhSamples.last.$2;
-      _qnh = mode == FlightMode.replay ? 1013.25 : qnhFor(p, _calibrationAltitude(raw));
+      _qnh = mode == FlightMode.replay ? 1013.25 : (Settings.instance.qnhHpa ?? qnhFor(p, _calibrationAltitude(raw)));
       _qnhSamples.clear();
     }
     final f = Fix(time: raw.time, lat: raw.lat, lon: raw.lon, gpsAltM: raw.gpsAltM, baroAltM: hasBarometer ? baroAltM : null);
@@ -307,24 +316,24 @@ class FlightController extends ChangeNotifier {
       glideRatio = currentGlideRatio(_since(f.time, 30));
     }
     // Final glide to the nearest known landing field.
-    Site? best;
+    final st = Settings.instance;
+    LandingField? best;
     var bestD = double.infinity;
-    for (final s in AppState.instance.sites) {
-      if (s.landingLat == null) continue;
-      final d = distanceM(f.lat, f.lon, s.landingLat!, s.landingLon!);
+    for (final l in AppState.instance.landings) {
+      final d = distanceM(f.lat, f.lon, l.lat, l.lon);
       if (d < bestD) {
         bestD = d;
-        best = s;
+        best = l;
       }
     }
-    landingSite = bestD < 40000 ? best : null;
-    finalGlideToLanding = landingSite == null
+    landing = bestD < 40000 ? best : null;
+    finalGlideToLanding = landing == null
         ? null
         : finalGlide(
             lat: f.lat, lon: f.lon, altM: f.altM,
-            goalLat: landingSite!.landingLat!, goalLon: landingSite!.landingLon!,
-            goalElevationM: landingSite!.landingElevationM ?? 0,
+            goalLat: landing!.lat, goalLon: landing!.lon, goalElevationM: landing!.elevationM,
             windFromDeg: wind?.fromDeg ?? 0, windKmh: wind?.speedKmh ?? 0,
+            polar: st.polar, safetyM: st.safetyMarginM,
           );
   }
 

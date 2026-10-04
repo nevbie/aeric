@@ -12,6 +12,7 @@ import '../services/app_state.dart';
 import '../services/flight_controller.dart';
 import '../services/logbook.dart';
 import 'common.dart';
+import 'settings_screen.dart';
 
 String _dur(Duration d) => '${d.inHours}:${(d.inMinutes % 60).toString().padLeft(2, '0')} h';
 
@@ -54,9 +55,12 @@ class _LogbookScreenState extends State<LogbookScreen> {
           ListTile(
             title: Text('${e.length} flights · ${_dur(airtime)}'),
             subtitle: Text('$thermals thermals found – shown as "My thermals" on the map'),
-            trailing: book.busy
-                ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                : FilledButton.tonalIcon(onPressed: _import, icon: const Icon(Icons.file_open), label: const Text('Import IGC')),
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              book.busy
+                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                  : FilledButton.tonalIcon(onPressed: _import, icon: const Icon(Icons.file_open), label: const Text('Import IGC')),
+              IconButton(tooltip: 'Settings', icon: const Icon(Icons.settings_outlined), onPressed: () => openSettings(context)),
+            ]),
           ),
           if (book.message != null)
             Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(book.message!)),

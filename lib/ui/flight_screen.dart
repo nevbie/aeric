@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../core/geo.dart';
 import '../services/flight_controller.dart';
+import '../services/settings.dart';
 import 'common.dart';
+import 'settings_screen.dart';
 
 /// In-flight instruments: vario, altitude, height above ground, speed, wind, glide.
 class FlightScreen extends StatelessWidget {
@@ -38,12 +40,12 @@ class FlightScreen extends StatelessWidget {
                 _Tile(
                   'Landing',
                   fg == null ? '–' : '${fg.distanceKm.toStringAsFixed(1)} km',
-                  fc.landingSite == null ? 'none within 40 km' : '${fc.landingSite!.name.split(' (').first} · ${compass(fg!.bearingDeg)}',
+                  fc.landing == null ? 'none within 40 km' : '${fc.landing!.name} · ${compass(fg!.bearingDeg)}',
                 ),
                 _Tile(
                   'Needed L/D',
                   fg?.requiredGlideRatio == null ? '–' : fg!.requiredGlideRatio!.toStringAsFixed(1),
-                  'incl. 150 m margin',
+                  'incl. ${Settings.instance.safetyMarginM.round()} m margin',
                   color: fg == null ? null : (fg.reachable ? goColor : noGoColor),
                 ),
                 _Tile(
@@ -77,6 +79,11 @@ class FlightScreen extends StatelessWidget {
                 tooltip: fc.audio.muted ? 'Vario sound on' : 'Mute vario',
                 icon: Icon(fc.audio.muted ? Icons.volume_off : Icons.volume_up),
                 onPressed: fc.toggleMute,
+              ),
+              IconButton.filledTonal(
+                tooltip: 'Settings',
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: () => openSettings(context),
               ),
               IconButton.filledTonal(
                 tooltip: fc.voice ? 'Voice off' : 'Voice on',

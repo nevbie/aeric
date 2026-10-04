@@ -70,9 +70,10 @@ void main() {
     expect(fc.wind, isNotNull);
     expect(fc.wind!.fromDeg, closeTo(270, 8));
     expect(fc.wind!.speedKmh, closeTo(15, 2));
-    // Final glide target: the nearest known landing field (Hornisgrinde/Oppenau are > 15 km away).
-    expect(fc.landingSite, isNotNull);
-    expect(fc.finalGlideToLanding!.distanceKm, greaterThan(15));
+    // Final glide target: the nearest landing field – Merkur West, 1–2 km from the synthetic thermal.
+    expect(fc.landing, isNotNull);
+    expect(fc.landing!.id, anyOf('merkur-west', 'merkur-grossmatte'));
+    expect(fc.finalGlideToLanding!.distanceKm, lessThan(5));
     expect(fc.track.length, greaterThan(600));
   });
 }

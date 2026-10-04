@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'services/app_state.dart';
 import 'services/logbook.dart';
+import 'services/settings.dart';
 import 'ui/common.dart';
 import 'ui/flight_screen.dart';
 import 'ui/fly_screen.dart';
@@ -11,6 +12,7 @@ import 'ui/thermal_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  Settings.instance.load();
   AppState.instance.loadFavourites();
   Logbook.instance.load();
   runApp(const AericApp());

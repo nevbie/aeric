@@ -10,28 +10,28 @@ const _oppenau = 'Oppenauer Gleitschirmflieger – four launches around Oppenau 
 
 const blackForestSites = [
   Site(
-    id: 'loffenau-west', name: 'Loffenau Teufelsmühle West', lat: 48.7539, lon: 8.4083,
-    takeoffElevationM: 900, landingElevationM: 400,
+    id: 'loffenau-west', name: 'Loffenau Teufelsmühle West', lat: 48.7567, lon: 8.4072,
+    takeoffElevationM: 890, landingElevationM: 389, landingLat: 48.7727, landingLon: 8.3981,
     sectors: [WindSector(240, 280)], maxWindKmh: 20,
     notes: '$_loffenau West launch on the summit between inn and tower; suitable for beginners.',
   ),
   Site(
-    id: 'loffenau-nw', name: 'Loffenau Teufelsmühle Nordwest', lat: 48.7556, lon: 8.4060,
-    takeoffElevationM: 846, landingElevationM: 406,
+    id: 'loffenau-nw', name: 'Loffenau Teufelsmühle Nordwest', lat: 48.7583, lon: 8.4060,
+    takeoffElevationM: 834, landingElevationM: 389, landingLat: 48.7727, landingLon: 8.3981,
     sectors: [WindSector(280, 330)], maxWindKmh: 20,
-    notes: '$_loffenau Natural ramp below the tower, main direction 304°. Position approximate.',
+    notes: '$_loffenau Natural ramp below the tower, main direction 304°.',
   ),
   Site(
     id: 'merkur-west', name: 'Merkur West, Baden-Baden', lat: 48.7647, lon: 8.2794,
-    takeoffElevationM: 651,
+    takeoffElevationM: 651, landingElevationM: 250, landingLat: 48.7632, landingLon: 8.2619,
     sectors: [WindSector(220, 300)], maxWindKmh: 20,
-    notes: 'Gleitschirmverein Baden (Schwarzwaldgeier). Funicular to the top; steep but well levelled launch.',
+    notes: 'Gleitschirmverein Baden (Schwarzwaldgeier). Funicular to the top; steep but well levelled launch. Landings West (250 m) and Großmatte (240 m).',
   ),
   Site(
     id: 'merkur-no', name: 'Merkur Nordost, Baden-Baden', lat: 48.7646, lon: 8.2816,
-    takeoffElevationM: 660,
+    takeoffElevationM: 660, landingElevationM: 360, landingLat: 48.7669, landingLon: 8.2953,
     sectors: [WindSector(20, 50)], maxWindKmh: 20,
-    notes: 'Gleitschirmverein Baden (Schwarzwaldgeier). Launch direction 30°.',
+    notes: 'Gleitschirmverein Baden (Schwarzwaldgeier). Launch direction 30°. Landing Nordost above Staufenberg (360 m).',
   ),
   Site(
     id: 'hornisgrinde', name: 'Hornisgrinde Katzenkopf', lat: 48.5969, lon: 8.1962,

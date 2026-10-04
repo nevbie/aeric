@@ -13,6 +13,7 @@ import '../core/thermal_model.dart';
 import '../services/app_state.dart';
 import '../services/logbook.dart';
 import 'common.dart';
+import 'place_editor.dart';
 
 /// Topographic base map with relief; fine for personal use, attribution required.
 const topoTiles = 'https://tile.opentopomap.org/{z}/{x}/{y}.png';
@@ -200,7 +201,11 @@ class _MapScreenState extends State<MapScreen> {
     return Stack(children: [
       FlutterMap(
         mapController: _map,
-        options: MapOptions(initialCenter: LatLng(lat, lon), initialZoom: 9.5),
+        options: MapOptions(
+          initialCenter: LatLng(lat, lon),
+          initialZoom: 9.5,
+          onLongPress: (_, p) => showPlaceEditor(context, p.latitude, p.longitude),
+        ),
         children: [
           if (_tiles) TileLayer(urlTemplate: topoTiles, userAgentPackageName: 'com.nevbie.aeric', maxNativeZoom: 17),
           if (_tiles && showSkyways)
@@ -239,6 +244,16 @@ class _MapScreenState extends State<MapScreen> {
                   ),
             ]),
           MarkerLayer(markers: [
+            for (final l in app.landings)
+              Marker(
+                point: LatLng(l.lat, l.lon),
+                width: 22,
+                height: 22,
+                child: Tooltip(
+                  message: '${l.name} · ${l.elevationM.round()} m',
+                  child: const Icon(Icons.flag, size: 20, color: Color(0xFF1565C0)),
+                ),
+              ),
             for (final s in app.sites)
               Marker(point: LatLng(s.lat, s.lon), width: 26, height: 26, child: _siteMarker(s)),
           ]),
@@ -384,7 +399,7 @@ class _MapScreenState extends State<MapScreen> {
               Text(
                 'Heatmap: estimated paraglider climb (aeric thermal model, Open-Meteo forecast). '
                 '${showHotspots || showSkyways ? 'Hotspots/skyways: thermal.kk7.ch (XContest flights), non-commercial use. ' : ''}'
-                'Markers: best window of the day, gold ring = favourite. 🔍 loads the heatmap for the visible area.',
+                'Markers: best window of the day, gold ring = favourite, blue flags = landings. Long-press to add your own takeoff or landing. 🔍 loads the heatmap for the visible area.',
                 style: small?.copyWith(fontSize: 11),
               ),
             ]),
