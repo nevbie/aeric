@@ -10,6 +10,7 @@ import '../services/settings.dart';
 import '../services/task_store.dart';
 import '../core/task/task.dart';
 import 'common.dart';
+import 'instruments.dart';
 import 'settings_screen.dart';
 import 'task_sheet.dart';
 import 'thermal_assistant_view.dart';
@@ -24,48 +25,12 @@ class FlightScreen extends StatelessWidget {
     return ListenableBuilder(
       listenable: Listenable.merge([fc, TaskStore.instance]),
       builder: (context, _) {
-        final f = fc.fix;
-        final fg = fc.finalGlideToLanding;
-        final w = fc.wind;
         return Column(children: [
           if (fc.airspaceWarnings.isNotEmpty) _AirspaceBanner(fc.airspaceWarnings),
           _VarioPanel(fc.varioMs, fc.avg30Ms, fc.thermalAvgMs, fc.thermalGainM, fc.varioSource),
           if (fc.assist case final a?) ThermalAssistantView(a, trackDeg: fc.trackDeg),
           if (TaskStore.instance.task != null) _TaskCard(fc),
-          Expanded(
-            child: GridView.count(
-              crossAxisCount: 3,
-              childAspectRatio: 1.05,
-              padding: const EdgeInsets.all(6),
-              mainAxisSpacing: 6,
-              crossAxisSpacing: 6,
-              children: [
-                _Tile('Altitude', f == null ? '–' : '${f.altM.round()}', 'm${fc.hasBarometer ? ' baro' : ' GPS'}'),
-                _Tile('Above ground', fc.aglM == null ? '–' : '${fc.aglM!.round()}', 'm AGL'),
-                _Tile('Ground speed', f == null ? '–' : fc.groundSpeedKmh.toStringAsFixed(0), 'km/h'),
-                _Tile('Track', fc.trackDeg == null ? '–' : '${fc.trackDeg!.round()}°', fc.trackDeg == null ? '' : compass(fc.trackDeg!)),
-                _WindTile(w?.fromDeg, w?.speedKmh, fc.trackDeg),
-                _Tile('Glide', fc.glideRatio == null ? '–' : fc.glideRatio!.toStringAsFixed(1), 'L/D last 30 s'),
-                _Tile(
-                  'Landing',
-                  fg == null ? '–' : '${fg.distanceKm.toStringAsFixed(1)} km',
-                  fc.landing == null || fg == null ? 'none within 40 km' : '${fc.landing!.name} · ${compass(fg.bearingDeg)}',
-                ),
-                _Tile(
-                  'Needed L/D',
-                  fg?.requiredGlideRatio == null ? '–' : fg!.requiredGlideRatio!.toStringAsFixed(1),
-                  'incl. ${Settings.instance.safetyMarginM.round()} m margin',
-                  color: fg == null ? null : (fg.reachable ? goColor : noGoColor),
-                ),
-                _Tile(
-                  'Arrival',
-                  fg == null || fg.arrivalHeightM.isInfinite ? '–' : '${fg.arrivalHeightM.round()}',
-                  'm above margin',
-                  color: fg == null ? null : (fg.reachable ? goColor : noGoColor),
-                ),
-              ],
-            ),
-          ),
+          Expanded(child: _InstrumentPages(fc)),
           if (fc.error != null) ErrorText(fc.error!),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
@@ -227,74 +192,6 @@ class _BarPainter extends CustomPainter {
   bool shouldRepaint(_BarPainter old) => old.v != v || old.color != color;
 }
 
-class _Tile extends StatelessWidget {
-  const _Tile(this.label, this.value, this.unit, {this.color});
-  final String label;
-  final String value;
-  final String unit;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.all(7),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: t.labelSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
-        // The value takes the remaining height and shrinks on small screens.
-        Expanded(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(value, style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w700, color: color)),
-          ),
-        ),
-        Text(unit, style: t.labelSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
-      ]),
-    );
-  }
-}
-
-class _WindTile extends StatelessWidget {
-  const _WindTile(this.fromDeg, this.speedKmh, this.trackDeg);
-  final double? fromDeg;
-  final double? speedKmh;
-  final double? trackDeg;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.all(7),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Wind (circling)', style: t.labelSmall, maxLines: 1, overflow: TextOverflow.ellipsis),
-        Expanded(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (fromDeg != null)
-                // Arrow points where the wind blows to.
-                Transform.rotate(angle: (fromDeg! + 180) * math.pi / 180, child: const Icon(Icons.navigation, size: 22)),
-              const SizedBox(width: 4),
-              Text(speedKmh == null ? '–' : speedKmh!.toStringAsFixed(0), style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
-            ]),
-          ),
-        ),
-        Text(fromDeg == null ? 'circle once' : 'km/h from ${compass(fromDeg!)}', style: t.labelSmall, maxLines: 1),
-      ]),
-    );
-  }
-}
-
 class _TaskCard extends StatelessWidget {
   const _TaskCard(this.fc);
   final FlightController fc;
@@ -337,5 +234,156 @@ class _TaskCard extends StatelessWidget {
         ),
       ]),
     );
+  }
+}
+
+/// Swipeable pages of instrument tiles; editable (tap a tile to change it).
+class _InstrumentPages extends StatefulWidget {
+  const _InstrumentPages(this.fc);
+  final FlightController fc;
+
+  @override
+  State<_InstrumentPages> createState() => _InstrumentPagesState();
+}
+
+class _InstrumentPagesState extends State<_InstrumentPages> {
+  final _controller = PageController();
+  late List<InstrumentPage> pages = decodePages(Settings.instance.pagesJson);
+  int page = 0;
+  bool editing = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    Settings.instance.update((s) => s.pagesJson = encodePages(pages));
+    setState(() {});
+  }
+
+  Future<void> _pick(int pageIndex, int? tileIndex) async {
+    final choice = await showModalBottomSheet<Object>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true, // as tall as the chips need
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          // Chips instead of a long list: everything fits on one screen.
+          child: Wrap(spacing: 8, runSpacing: 4, children: [
+            if (tileIndex != null)
+              ActionChip(
+                avatar: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('Remove tile'),
+                onPressed: () => Navigator.pop(ctx, 'remove'),
+              ),
+            for (final i in Instrument.values) ActionChip(label: Text(i.label), onPressed: () => Navigator.pop(ctx, i)),
+          ]),
+        ),
+      ),
+    );
+    if (choice == null) return;
+    final tiles = pages[pageIndex].tiles;
+    if (choice == 'remove' && tileIndex != null) {
+      tiles.removeAt(tileIndex);
+    } else if (choice is Instrument) {
+      tileIndex == null ? tiles.add(choice) : tiles[tileIndex] = choice;
+    }
+    _save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 2, 4, 0),
+        child: Row(children: [
+          for (var i = 0; i < pages.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: i == page ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+            ),
+          const SizedBox(width: 4),
+          Expanded(child: Text(pages[page].name, style: t.labelMedium, overflow: TextOverflow.ellipsis)),
+          if (editing) ...[
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Add page',
+              icon: const Icon(Icons.add_box_outlined),
+              onPressed: () {
+                pages.add(InstrumentPage('Page ${pages.length + 1}', [Instrument.altitude, Instrument.groundSpeed]));
+                _save();
+              },
+            ),
+            if (pages.length > 1)
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Delete page',
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () {
+                  pages.removeAt(page);
+                  page = 0;
+                  _controller.jumpToPage(0);
+                  _save();
+                },
+              ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Reset pages',
+              icon: const Icon(Icons.restart_alt),
+              onPressed: () {
+                pages = defaultPages();
+                page = 0;
+                _controller.jumpToPage(0);
+                Settings.instance.update((s) => s.pagesJson = null);
+                setState(() {});
+              },
+            ),
+          ],
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: editing ? 'Done' : 'Edit pages',
+            icon: Icon(editing ? Icons.check : Icons.dashboard_customize_outlined),
+            onPressed: () => setState(() => editing = !editing),
+          ),
+        ]),
+      ),
+      Expanded(
+        child: PageView.builder(
+          controller: _controller,
+          itemCount: pages.length,
+          onPageChanged: (i) => setState(() => page = i),
+          itemBuilder: (context, pi) {
+            final tiles = pages[pi].tiles;
+            return GridView.count(
+              crossAxisCount: 3,
+              childAspectRatio: 1.05,
+              padding: const EdgeInsets.fromLTRB(6, 2, 6, 6),
+              mainAxisSpacing: 6,
+              crossAxisSpacing: 6,
+              children: [
+                for (var i = 0; i < tiles.length; i++)
+                  InstrumentTile(tiles[i], widget.fc, editing: editing, onTap: editing ? () => _pick(pi, i) : null),
+                if (editing)
+                  OutlinedButton(
+                    onPressed: () => _pick(pi, null),
+                    child: const Icon(Icons.add),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    ]);
   }
 }

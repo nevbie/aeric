@@ -27,6 +27,9 @@ class Settings extends ChangeNotifier {
   double volume = 0.6;
   bool voice = true;
 
+  /// Instrument page layouts (JSON, see ui/instruments.dart); null = defaults.
+  String? pagesJson;
+
   /// Manual QNH in hPa; null = calibrate automatically on the launch height / GPS.
   double? qnhHpa;
 
@@ -47,6 +50,7 @@ class Settings extends ChangeNotifier {
       volume = p.getDouble('volume') ?? volume;
       voice = p.getBool('voice') ?? voice;
       qnhHpa = p.getDouble('qnh');
+      pagesJson = p.getString('pages');
     } catch (e) {
       debugPrint('settings: $e');
     }
@@ -67,6 +71,11 @@ class Settings extends ChangeNotifier {
     await p.setDouble('sink', sinkAlarmMs);
     await p.setDouble('volume', volume);
     await p.setBool('voice', voice);
+    if (pagesJson == null) {
+      await p.remove('pages');
+    } else {
+      await p.setString('pages', pagesJson!);
+    }
     if (qnhHpa == null) {
       await p.remove('qnh');
     } else {
