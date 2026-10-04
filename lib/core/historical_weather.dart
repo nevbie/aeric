@@ -62,6 +62,18 @@ class HistoricalWeatherClient {
     return out;
   }
 
+  /// Hourly weather of one past day: ERA5 archive, or for the last weeks (not yet in the
+  /// archive) the forecast API's stored model runs.
+  Future<List<WeatherHour>> day(double lat, double lon, DateTime date, {required DateTime today}) async {
+    final d = dateOf(date);
+    if (dateOf(today).difference(d).inDays > archiveDelayDays) return history(lat, lon, d, d);
+    final ds = _d(d);
+    return parseOpenMeteo(await _get(Uri.parse(
+      'https://api.open-meteo.com/v1/forecast?latitude=${lat.toStringAsFixed(5)}&longitude=${lon.toStringAsFixed(5)}'
+      '&start_date=$ds&end_date=$ds&hourly=${hourly.join(',')}&wind_speed_unit=kmh&timezone=auto',
+    )));
+  }
+
   Future<List<WeatherHour>> seasonalHistory(
     double lat,
     double lon,
