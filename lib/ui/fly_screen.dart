@@ -17,6 +17,7 @@ class FlyScreen extends StatefulWidget {
 
 class _FlyScreenState extends State<FlyScreen> {
   int dayOffset = 0;
+  bool favouritesOnly = true;
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +27,8 @@ class _FlyScreenState extends State<FlyScreen> {
     const planner = DayPlanner();
     final plans = planner.rankSites([
       for (final s in app.sites)
-        if (app.forecasts[s.id] case final f?) planner.planDay(s, f, days[dayOffset]),
+        if (!favouritesOnly || app.isFavourite(s))
+          if (app.forecasts[s.id] case final f?) planner.planDay(s, f, days[dayOffset]),
     ]);
 
     return Column(children: [
@@ -46,6 +48,12 @@ class _FlyScreenState extends State<FlyScreen> {
                       onSelected: (_) => setState(() => dayOffset = i),
                     ),
                   ),
+                FilterChip(
+                  avatar: const Icon(Icons.star, size: 16),
+                  label: const Text('Favourites'),
+                  selected: favouritesOnly,
+                  onSelected: (v) => setState(() => favouritesOnly = v),
+                ),
               ]),
             ),
           ),
@@ -109,6 +117,7 @@ class _SiteCardState extends State<_SiteCard> {
                 ]),
               ),
               Text('${plan.site.takeoffElevationM.round()} m', style: text.labelMedium),
+              FavouriteButton(plan.site),
             ]),
             const SizedBox(height: 10),
             // Verdict strip (top) and thermal strip (bottom), one cell per daylight hour.
@@ -135,6 +144,16 @@ class _SiteCardState extends State<_SiteCard> {
             ]),
             if (expanded) ...[
               const Divider(height: 18),
+              if (plan.site.notes.isNotEmpty)
+                Padding(padding: const EdgeInsets.only(bottom: 6), child: Text(plan.site.notes, style: text.bodySmall)),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.wb_sunny_outlined, size: 18),
+                  label: const Text('Live thermals'),
+                  onPressed: () => AppState.instance.showThermals(plan.site),
+                ),
+              ),
               for (var i = 0; i < plan.assessments.length; i++) _HourRow(plan.assessments[i], plan.thermals[i]),
             ],
           ]),

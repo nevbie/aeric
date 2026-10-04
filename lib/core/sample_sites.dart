@@ -1,8 +1,73 @@
 import 'site.dart';
 
-/// Starter sites so the app is useful out of the box. Coordinates/orientations are approximate –
-/// always check the local club/DHV site guide before flying.
-const sampleSites = [
+// Northern Black Forest takeoffs from the DHV site database (service.dhv.de) and the clubs.
+// Coordinates and sectors are approximate. Most sites need club membership/day
+// membership and a briefing – always check the club and DHV site guide before flying.
+
+const _loffenau = 'Drachen- und Gleitschirmclub Loffenau (teufels-flieger.de). Both launches are in the forest: '
+    'only launch with clear headwind. Landing Loffenau.';
+const _oppenau = 'Oppenauer Gleitschirmflieger – four launches around Oppenau cover NE through W wind.';
+
+const blackForestSites = [
+  Site(
+    id: 'loffenau-west', name: 'Loffenau Teufelsmühle West', lat: 48.7539, lon: 8.4083,
+    takeoffElevationM: 900, landingElevationM: 400,
+    sectors: [WindSector(240, 280)], maxWindKmh: 20,
+    notes: '$_loffenau West launch on the summit between inn and tower; suitable for beginners.',
+  ),
+  Site(
+    id: 'loffenau-nw', name: 'Loffenau Teufelsmühle Nordwest', lat: 48.7556, lon: 8.4060,
+    takeoffElevationM: 846, landingElevationM: 406,
+    sectors: [WindSector(280, 330)], maxWindKmh: 20,
+    notes: '$_loffenau Natural ramp below the tower, main direction 304°. Position approximate.',
+  ),
+  Site(
+    id: 'merkur-west', name: 'Merkur West, Baden-Baden', lat: 48.7647, lon: 8.2794,
+    takeoffElevationM: 651,
+    sectors: [WindSector(220, 300)], maxWindKmh: 20,
+    notes: 'Gleitschirmverein Baden (Schwarzwaldgeier). Funicular to the top; steep but well levelled launch.',
+  ),
+  Site(
+    id: 'merkur-no', name: 'Merkur Nordost, Baden-Baden', lat: 48.7646, lon: 8.2816,
+    takeoffElevationM: 660,
+    sectors: [WindSector(20, 50)], maxWindKmh: 20,
+    notes: 'Gleitschirmverein Baden (Schwarzwaldgeier). Launch direction 30°.',
+  ),
+  Site(
+    id: 'hornisgrinde', name: 'Hornisgrinde Katzenkopf', lat: 48.5969, lon: 8.1962,
+    takeoffElevationM: 1123, landingElevationM: 463,
+    sectors: [WindSector(230, 280)], maxWindKmh: 10,
+    notes: 'Seebach. DHV: wind 230–280°, max. 10 km/h. Briefing, B licence and day membership required. '
+        'Long glide over forest with hardly any emergency landing options.',
+  ),
+  Site(
+    id: 'oppenau-rossbuehl', name: 'Oppenau Rossbühl (SW–W)', lat: 48.4870, lon: 8.2391,
+    takeoffElevationM: 930, landingElevationM: 500,
+    sectors: [WindSector(202.5, 292.5)], maxWindKmh: 20,
+    notes: '$_oppenau Spacious launch with top-landing; landing Nockenbauernhof.',
+  ),
+  Site(
+    id: 'oppenau-sandkopf', name: 'Oppenau Sandkopf (S)', lat: 48.4965, lon: 8.2328,
+    takeoffElevationM: 930, landingElevationM: 500,
+    sectors: [WindSector(157.5, 202.5)], maxWindKmh: 20,
+    notes: '$_oppenau Access on foot; landing Nockenbauernhof.',
+  ),
+  Site(
+    id: 'oppenau-schaefersfeld', name: 'Oppenau Schäfersfeld (E–SE)', lat: 48.4357, lon: 8.1520,
+    takeoffElevationM: 770, landingElevationM: 305,
+    sectors: [WindSector(67.5, 157.5)], maxWindKmh: 20,
+    notes: '$_oppenau Landing Bruhansenhof.',
+  ),
+  Site(
+    id: 'oppenau-ibach', name: 'Oppenau Ibacher Holzplatz (NE)', lat: 48.4475, lon: 8.1460,
+    takeoffElevationM: 740, landingElevationM: 305,
+    sectors: [WindSector(22.5, 67.5)], maxWindKmh: 20,
+    notes: '$_oppenau Bird protection area: fly only from 2 h after sunrise to 1 h before sunset. Landing Bruhansenhof.',
+  ),
+];
+
+/// Alpine sites from the first version, kept for trips.
+const alpineSites = [
   Site(
     id: 'tegelberg', name: 'Tegelberg (DE)', lat: 47.5600, lon: 10.7740,
     takeoffElevationM: 1720, landingElevationM: 800,
@@ -29,3 +94,8 @@ const sampleSites = [
     sectors: [WindSector(135, 225)],
   ),
 ];
+
+const sampleSites = [...blackForestSites, ...alpineSites];
+
+/// Favourites on first start: Loffenau, Merkur, Hornisgrinde and Oppenau.
+final defaultFavouriteIds = {for (final s in blackForestSites) s.id};

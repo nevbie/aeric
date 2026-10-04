@@ -7,6 +7,17 @@ estimates.
 - **Fly**: today, tomorrow or the day after, with sites ranked by their best flyable window. Each
   site gets an hourly traffic light with reasons (wind direction vs. launch sector, strength, gusts,
   wind aloft, rain, CAPE, cloud base) and an estimated thermal climb for each hour.
+- **Favourites**: on first start these are the Northern Black Forest takeoffs: Loffenau Teufelsmühle (W, NW),
+  Merkur (W, NE), Hornisgrinde Katzenkopf, and Oppenau (Rossbühl, Sandkopf, Schäfersfeld, Ibacher Holzplatz).
+  The data comes from the DHV site database. Star a site to add or remove it; the Fly tab shows favourites
+  by default.
+- **Map** (Thermik-Karte, like ericapp): a topographic map (OpenTopoMap) with
+  - a **thermal heatmap**: estimated climb on a 10×10 grid around the favourites, by hour or best hour of
+    the day, for today and the next two days. 🔍 loads the grid for the visible area.
+  - **Hotspots** and **Skyways**: historical thermals from thermal.kk7.ch, computed from XContest flights
+    (non-commercial use only).
+  - takeoff markers coloured by the day's best window (gold ring = favourite). Tap one for its window and
+    **Live thermals**.
 - **Thermals**: a live thermal estimate for the selected site:
   - **Now**: estimated climb, updraft w\*, thermal top or cumulus base, height above takeoff,
     temperature, cloud cover, wind, and sun on the ground.

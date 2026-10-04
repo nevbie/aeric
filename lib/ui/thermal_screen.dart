@@ -22,10 +22,9 @@ class ThermalScreen extends StatefulWidget {
 
 class _ThermalScreenState extends State<ThermalScreen> {
   final app = AppState.instance;
-  int siteIndex = 0;
   Timer? _tick;
 
-  Site get site => app.sites[siteIndex];
+  Site get site => app.thermalSiteId == null ? app.sitesByFavourite.first : app.siteById(app.thermalSiteId!);
 
   @override
   void initState() {
@@ -47,9 +46,10 @@ class _ThermalScreenState extends State<ThermalScreen> {
     super.dispose();
   }
 
-  void _select(int i) {
-    setState(() => siteIndex = i);
-    app.loadClimatology(site);
+  void _select(Site s) {
+    app.thermalSiteId = s.id;
+    app.loadClimatology(s);
+    setState(() {});
   }
 
   @override
@@ -68,13 +68,14 @@ class _ThermalScreenState extends State<ThermalScreen> {
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(children: [
-                for (var i = 0; i < app.sites.length; i++)
+                for (final s in app.sitesByFavourite)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
-                      label: Text(app.sites[i].name),
-                      selected: siteIndex == i,
-                      onSelected: (_) => _select(i),
+                      avatar: app.isFavourite(s) ? const Icon(Icons.star, size: 16, color: Colors.amber) : null,
+                      label: Text(s.name),
+                      selected: site.id == s.id,
+                      onSelected: (_) => _select(s),
                     ),
                   ),
               ]),
@@ -150,7 +151,10 @@ class _NowCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Now at ${r.site.name} · ${hhmm(r.now)}', style: t.labelLarge),
+          Row(children: [
+            Expanded(child: Text('Now at ${r.site.name} · ${hhmm(r.now)}', style: t.labelLarge)),
+            FavouriteButton(r.site),
+          ]),
           const SizedBox(height: 6),
           Row(children: [
             Dot(climbColor(c?.climbMs ?? 0), size: 18),

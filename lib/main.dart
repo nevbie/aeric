@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'services/app_state.dart';
 import 'ui/common.dart';
 import 'ui/fly_screen.dart';
+import 'ui/map_screen.dart';
 import 'ui/thermal_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AppState.instance.loadFavourites();
   runApp(const AericApp());
   AppState.instance.refreshForecasts();
 }
@@ -27,8 +30,22 @@ class AericApp extends StatelessWidget {
   }
 }
 
-class HomeShell extends StatelessWidget {
+class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  /// Tabs are built on first visit (the map would otherwise load tiles at start-up) and kept alive.
+  final _visited = <int>{};
+
+  static Widget _tab(int i) => switch (i) {
+        0 => const FlyScreen(),
+        1 => const MapScreen(),
+        _ => const ThermalScreen(),
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -37,13 +54,19 @@ class HomeShell extends StatelessWidget {
       listenable: app,
       builder: (context, _) => Scaffold(
         body: SafeArea(
-          child: IndexedStack(index: app.tab, children: const [FlyScreen(), ThermalScreen()]),
+          child: IndexedStack(
+            index: app.tab,
+            children: [
+              for (var i = 0; i < 3; i++) (_visited..add(app.tab)).contains(i) ? _tab(i) : const SizedBox.shrink(),
+            ],
+          ),
         ),
         bottomNavigationBar: NavigationBar(
           selectedIndex: app.tab,
           onDestinationSelected: app.setTab,
           destinations: const [
             NavigationDestination(icon: Icon(Icons.paragliding), label: 'Fly'),
+            NavigationDestination(icon: Icon(Icons.map_outlined), label: 'Map'),
             NavigationDestination(icon: Icon(Icons.wb_sunny_outlined), label: 'Thermals'),
           ],
         ),

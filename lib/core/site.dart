@@ -48,7 +48,8 @@ class Site {
   final double maxWindKmh;
   final String notes;
 
-  double sectorDistance(double dirDeg) => sectors.isEmpty
-      ? 180
-      : sectors.map((s) => s.distanceFrom(dirDeg)).reduce((a, b) => a < b ? a : b);
+  /// Degrees the wind is outside the launch sectors. A site without sectors (e.g. a point
+  /// on the thermal map) accepts every direction.
+  double sectorDistance(double dirDeg) =>
+      sectors.isEmpty ? 0 : sectors.map((s) => s.distanceFrom(dirDeg)).reduce((a, b) => a < b ? a : b);
 }

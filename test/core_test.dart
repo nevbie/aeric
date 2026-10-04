@@ -1,11 +1,15 @@
+import 'dart:convert';
+
 import 'package:aeric/core/day_planner.dart';
 import 'package:aeric/core/flyability.dart';
 import 'package:aeric/core/historical_weather.dart';
 import 'package:aeric/core/live_thermal.dart';
 import 'package:aeric/core/open_meteo.dart';
+import 'package:aeric/core/sample_sites.dart';
 import 'package:aeric/core/site.dart';
 import 'package:aeric/core/solar.dart';
 import 'package:aeric/core/thermal_climatology.dart';
+import 'package:aeric/core/thermal_grid.dart';
 import 'package:aeric/core/thermal_model.dart';
 import 'package:aeric/core/weather_hour.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -291,6 +295,83 @@ void main() {
       final r = LiveThermalReport.infer(site: site, hours: syntheticDay(day), now: day.add(const Duration(hours: 12)));
       expect(r.comparisons, isEmpty);
       expect(r.current, isNotNull);
+    });
+  });
+
+  group('Black Forest sites', () {
+    test('Loffenau, Merkur, Hornisgrinde and Oppenau are the default favourites', () {
+      final names = blackForestSites.map((s) => s.name).join(' | ');
+      for (final place in ['Loffenau', 'Merkur', 'Hornisgrinde', 'Oppenau']) {
+        expect(names, contains(place));
+      }
+      expect(defaultFavouriteIds, hasLength(blackForestSites.length));
+      expect(sampleSites.map((s) => s.id).toSet(), hasLength(sampleSites.length)); // unique ids
+    });
+
+    test('launch sectors match the DHV directions', () {
+      Site site(String id) => blackForestSites.firstWhere((s) => s.id == id);
+      expect(site('merkur-west').sectorDistance(260), 0);
+      expect(site('merkur-no').sectorDistance(30), 0);
+      expect(site('merkur-no').sectorDistance(260), greaterThan(90));
+      expect(site('hornisgrinde').sectorDistance(250), 0);
+      expect(site('loffenau-nw').sectorDistance(304), 0);
+      // Oppenau's four launches cover NE through W; NW–N has no launch.
+      final oppenau = blackForestSites.where((s) => s.id.startsWith('oppenau'));
+      double best(double dir) => oppenau.map((s) => s.sectorDistance(dir)).reduce((a, b) => a < b ? a : b);
+      for (var dir = 30.0; dir <= 285; dir += 15) {
+        expect(best(dir), 0, reason: 'wind $dir°');
+      }
+      expect(best(340), greaterThan(0));
+      // Hornisgrinde allows only 10 km/h (DHV).
+      const assessor = FlyabilityAssessor();
+      final h = hour(12, speed: 14, dir: 250);
+      expect(assessor.assess(site('hornisgrinde'), h).verdict, Verdict.noGo);
+    });
+  });
+
+  group('Thermal grid', () {
+    test('grid points cover the area evenly', () {
+      final pts = ThermalGrid.gridPoints(48.6, 8.28, n: 4, spanKm: 40);
+      expect(pts, hasLength(16));
+      final lats = pts.map((p) => p.$1);
+      expect(lats.reduce((a, b) => a < b ? a : b), closeTo(48.6 - 40 / 111 * 0.75, 1e-9));
+      final url = ThermalGrid.buildUrl(pts).toString();
+      expect(url, contains('latitude=${pts.first.$1.toStringAsFixed(4)},'));
+      expect(url, contains('shortwave_radiation'));
+      expect(url, contains('wind_speed_10m'));
+    });
+
+    test('parses a multi-location response and estimates thermals per cell', () {
+      Map<String, dynamic> location(double elevation, double cloud) {
+        final day = syntheticDay(DateTime(2026, 7, 1), cloud: cloud, spread: 16);
+        String iso(DateTime t) => t.toIso8601String().substring(0, 16);
+        return {
+          'elevation': elevation,
+          'utc_offset_seconds': 7200,
+          'hourly': {
+            'time': [for (final h in day) iso(h.time)],
+            'temperature_2m': [for (final h in day) h.temperature2m],
+            'dew_point_2m': [for (final h in day) h.dewPoint2m],
+            'cloud_cover': [for (final h in day) h.cloudCover],
+            'shortwave_radiation': [for (final h in day) h.shortwaveRadiation],
+            'wind_speed_10m': [for (final h in day) h.windSpeed10m],
+            'wind_direction_10m': [for (final h in day) h.windDir10m],
+          },
+        };
+      }
+
+      final pts = ThermalGrid.gridPoints(48.6, 8.28, n: 1, spanKm: 40) + [(48.7, 8.3)];
+      final body = jsonEncode([location(700, 0), location(300, 100)]);
+      final grid = ThermalGrid.parse(body, pts, centerLat: 48.6, centerLon: 8.28, n: 2, spanKm: 40);
+      expect(grid.cells, hasLength(2));
+      final sunny = grid.cells[0], overcast = grid.cells[1];
+      expect(sunny.elevationM, 700);
+      expect(sunny.corners, hasLength(4));
+      final noon = DateTime(2026, 7, 1, 13, 40);
+      expect(sunny.at(noon)!.time, DateTime(2026, 7, 1, 13));
+      expect(sunny.bestOf(noon)!.climbMs, greaterThan(overcast.bestOf(noon)!.climbMs));
+      expect(sunny.bestOf(noon)!.usable, isTrue);
+      expect(sunny.bestOf(DateTime(2026, 7, 2)), isNull);
     });
   });
 }
