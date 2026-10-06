@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'services/airspace_store.dart';
 import 'services/app_state.dart';
+import 'services/crash_reporting.dart';
 import 'services/logbook.dart';
 import 'services/settings.dart';
 import 'services/task_store.dart';
@@ -12,16 +13,17 @@ import 'ui/logbook_screen.dart';
 import 'ui/map_screen.dart';
 import 'ui/thermal_screen.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  Settings.instance.load();
-  AppState.instance.loadFavourites();
-  Logbook.instance.load();
-  AirspaceStore.instance.load();
-  TaskStore.instance.load();
-  runApp(const AericApp());
-  AppState.instance.refreshForecasts();
-}
+Future<void> main() => runWithCrashReporting(
+      () async {
+        Settings.instance.load();
+        AppState.instance.loadFavourites();
+        Logbook.instance.load();
+        AirspaceStore.instance.load();
+        TaskStore.instance.load();
+      },
+      () => const AericApp(),
+      after: () => AppState.instance.refreshForecasts(),
+    );
 
 class AericApp extends StatelessWidget {
   const AericApp({super.key});

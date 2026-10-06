@@ -101,8 +101,18 @@ flutter build apk --release            # Android
 flutter build ios --release            # iOS (needs macOS + Xcode; signing for devices)
 ```
 
-GitHub Actions runs analyze and tests on every push. It also builds the Android APK (uploaded as
-an artifact) and an unsigned iOS build to prove the iOS target compiles.
+GitHub Actions runs analyze and tests on every push and pull request (Flutter pinned in
+`.github/workflows/build.yaml`). It also builds the Android APK (uploaded as an artifact) and an
+unsigned iOS build to prove the iOS target compiles. One-time on GitHub: *Settings → Branches* →
+protect `main`, require the status check **test**.
+
+**Crash reporting:** release builds report crashes to [Sentry](https://sentry.io) when the repository
+secret `SENTRY_DSN` is set; without it nothing is sent. No personal data, tracks or positions are
+attached. Errors in best-effort steps (stopping audio, Bluetooth disconnect, optional lookups) are
+logged via `logIgnored` instead of being swallowed. Mention Sentry in the privacy policy before publishing.
+
+This app replaces the paragliding half of the old Kotlin *ericapp*; the motorcycle half is now
+[Moteric](https://github.com/nevbie/ericapp) (Flutter).
 
 See **[docs/PLAN.md](docs/PLAN.md)** for the roadmap (in-flight vario, thermal assistant, tasks, airspace, IGC logbook, …).
 
@@ -116,5 +126,7 @@ See **[docs/PLAN.md](docs/PLAN.md)** for the roadmap (in-flight vario, thermal a
 
 Data: weather from [Open-Meteo](https://open-meteo.com) (forecast and historical ERA5). Using it
 without a key is free for non-commercial use only; a commercial release needs their paid plan.
+The same applies to the thermal maps from thermal.kk7.ch (non-commercial use only), and the
+OpenTopoMap tiles are for light use – a published app with many users needs its own tile provider.
 
 > Planning aid only. Always judge conditions on site and follow local rules and airspace.

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/landing.dart';
 import '../core/site.dart';
 import '../services/app_state.dart';
+import '../services/crash_reporting.dart';
 
 /// Bottom sheet to add an own takeoff or landing field at [lat]/[lon] (long-press on the map).
 Future<void> showPlaceEditor(BuildContext context, double lat, double lon) async {
@@ -10,7 +11,9 @@ Future<void> showPlaceEditor(BuildContext context, double lat, double lon) async
   double? ele;
   try {
     ele = await app.elevation.elevation(lat, lon);
-  } catch (_) {}
+  } catch (e) {
+    logIgnored('Elevation lookup', e); // the field stays empty and can be typed in
+  }
   if (!context.mounted) return;
   await showModalBottomSheet<void>(
     context: context,
