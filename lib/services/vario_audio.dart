@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 
 import '../core/flight/vario_tone.dart';
+import 'crash_reporting.dart';
 
 /// Streams vario beeps through the platform audio output. The PCM is generated in Dart from
 /// the current climb rate in 50 ms chunks, so pitch and beep rate follow the vario quickly.
@@ -45,6 +46,8 @@ class VarioAudio {
     try {
       FlutterPcmSound.setFeedCallback(null);
       await FlutterPcmSound.release();
-    } catch (_) {}
+    } catch (e) {
+      logIgnored('Stopping vario audio', e);
+    }
   }
 }

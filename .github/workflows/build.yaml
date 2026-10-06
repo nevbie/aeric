@@ -1,18 +1,29 @@
 name: Build aeric
 
+# Every push and pull request: analyze + tests, then Android and iOS builds.
+# Make the "test" job a required status check on main.
+# Crash reporting is only compiled in when the repository secret SENTRY_DSN is set.
 on:
   push:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.6'
           cache: true
       - run: flutter pub get
       - run: flutter analyze
@@ -22,21 +33,25 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.6'
           cache: true
       - name: Generate platform folders
         run: |
           flutter create --platforms=android,ios --org com.nevbie --project-name aeric .
           python3 tool/patch_platforms.py
           dart run flutter_launcher_icons
-      - run: flutter build apk --release
+      - name: Build APK
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: flutter build apk --release --dart-define=SENTRY_DSN="$SENTRY_DSN"
       - uses: actions/upload-artifact@v4
         with:
           name: aeric-apk
@@ -46,10 +61,11 @@ jobs:
     needs: test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.6'
           cache: true
       - name: Generate platform folders
         run: |

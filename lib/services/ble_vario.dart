@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_ble/universal_ble.dart';
 
 import '../core/devices/vario_protocols.dart';
+import 'crash_reporting.dart';
 
 enum BleState { idle, scanning, connecting, connected, error }
 
@@ -61,7 +62,9 @@ class BleVario extends ChangeNotifier {
     _scanSub = null;
     try {
       await UniversalBle.stopScan();
-    } catch (_) {}
+    } catch (e) {
+      logIgnored('Stopping BLE scan', e);
+    }
     if (state == BleState.scanning) {
       state = BleState.idle;
       notifyListeners();
@@ -124,7 +127,9 @@ class BleVario extends ChangeNotifier {
     if (id != null) {
       try {
         await UniversalBle.disconnect(id);
-      } catch (_) {}
+      } catch (e) {
+        logIgnored('BLE disconnect', e);
+      }
     }
     if (forget) (await SharedPreferences.getInstance()).remove(_savedKey);
     state = BleState.idle;
