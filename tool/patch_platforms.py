@@ -104,3 +104,42 @@ default_test = root / "test/widget_test.dart"
 if default_test.exists():
     default_test.unlink()
     print("removed", default_test)
+
+# ---------------------------------------------------------------- Release signing
+# CI writes android/key.properties (+ the keystore) from GitHub secrets. Without it the release
+# APK is signed with a throwaway debug key, so updates would not install over earlier builds.
+app_gradle = root / "android/app/build.gradle.kts"
+sign_marker = "release signing from key.properties"
+if app_gradle.exists() and sign_marker not in app_gradle.read_text():
+    g = app_gradle.read_text()
+    # Kotlin DSL: only imports may precede the plugins block, so the properties go after it.
+    props = ("\n"
+             f"// {sign_marker}\n"
+             "val keystoreProperties = Properties()\n"
+             "val keystorePropertiesFile = rootProject.file(\"key.properties\")\n"
+             "val hasReleaseKeystore = keystorePropertiesFile.exists()\n"
+             "if (hasReleaseKeystore) {\n"
+             "    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }\n"
+             "}\n")
+    signing = ("    signingConfigs {\n"
+               "        if (hasReleaseKeystore) {\n"
+               "            create(\"release\") {\n"
+               "                keyAlias = keystoreProperties.getProperty(\"keyAlias\")\n"
+               "                keyPassword = keystoreProperties.getProperty(\"keyPassword\")\n"
+               "                storeFile = file(keystoreProperties.getProperty(\"storeFile\"))\n"
+               "                storePassword = keystoreProperties.getProperty(\"storePassword\")\n"
+               "            }\n"
+               "        }\n"
+               "    }\n\n"
+               "    buildTypes {\n")
+    plugins_end = g.find("\n}\n", g.find("plugins {"))
+    if (g.find("plugins {") < 0 or plugins_end < 0 or "    buildTypes {\n" not in g
+            or 'signingConfig = signingConfigs.getByName("debug")' not in g):
+        print("::warning::patch_platforms: unexpected android/app/build.gradle.kts layout, release signing not added")
+    else:
+        g = "import java.util.Properties\n\n" + g[:plugins_end + 3] + props + g[plugins_end + 3:]
+        g = g.replace("    buildTypes {\n", signing, 1)
+        g = g.replace('signingConfig = signingConfigs.getByName("debug")',
+                      'signingConfig = signingConfigs.getByName(if (hasReleaseKeystore) "release" else "debug")', 1)
+        app_gradle.write_text(g)
+        print("patched", app_gradle, "(release key)" if (root / "android/key.properties").exists() else "(no key.properties: debug key)")
