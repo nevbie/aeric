@@ -93,21 +93,37 @@ String? _headerValue(String line) {
 /// Writes an (unsigned) IGC file. XContest accepts unsigned files from apps it has not validated
 /// only as "unverified"; a G record needs a key registered with them.
 String writeIgc(List<Fix> fixes, {String pilot = '', String glider = '', String appVersion = '0.2'}) {
-  final out = StringBuffer();
-  final d = fixes.isEmpty ? DateTime.now().toUtc() : fixes.first.time.toUtc();
-  out.writeln('AXAE001 aeric $appVersion');
-  out.writeln('HFDTEDATE:${_two(d.day)}${_two(d.month)}${_two(d.year % 100)},01');
-  out.writeln('HFPLTPILOTINCHARGE:$pilot');
-  out.writeln('HFGTYGLIDERTYPE:$glider');
-  out.writeln('HFDTMGPSDATUM:WGS-1984');
-  out.writeln('HFFTYFRTYPE:aeric,$appVersion');
-  out.writeln('HFGPSRECEIVER:phone');
-  out.writeln('HFPRSPRESSALTSENSOR:${fixes.any((f) => f.baroAltM != null) ? 'phone barometer' : 'none'}');
+  final out = StringBuffer(igcHeader(
+    fixes.isEmpty ? DateTime.now().toUtc() : fixes.first.time,
+    pilot: pilot,
+    glider: glider,
+    appVersion: appVersion,
+    baro: fixes.any((f) => f.baroAltM != null),
+  ));
   for (final f in fixes) {
-    final t = f.time.toUtc();
-    out.writeln('B${_two(t.hour)}${_two(t.minute)}${_two(t.second)}'
-        '${_coord(f.lat, true)}${_coord(f.lon, false)}${f.valid ? 'A' : 'V'}'
-        '${f.baroAltM == null ? '00000' : _alt(f.baroAltM)}${_alt(f.gpsAltM)}');
+    out.writeln(igcBRecord(f));
   }
   return out.toString();
+}
+
+/// The A and H records of an IGC file (each line ends with a newline).
+String igcHeader(DateTime date,
+    {String pilot = '', String glider = '', String appVersion = '0.2', bool baro = false}) {
+  final d = date.toUtc();
+  return 'AXAE001 aeric $appVersion\n'
+      'HFDTEDATE:${_two(d.day)}${_two(d.month)}${_two(d.year % 100)},01\n'
+      'HFPLTPILOTINCHARGE:$pilot\n'
+      'HFGTYGLIDERTYPE:$glider\n'
+      'HFDTMGPSDATUM:WGS-1984\n'
+      'HFFTYFRTYPE:aeric,$appVersion\n'
+      'HFGPSRECEIVER:phone\n'
+      'HFPRSPRESSALTSENSOR:${baro ? 'phone barometer' : 'none'}\n';
+}
+
+/// One B record (fix) without the newline.
+String igcBRecord(Fix f) {
+  final t = f.time.toUtc();
+  return 'B${_two(t.hour)}${_two(t.minute)}${_two(t.second)}'
+      '${_coord(f.lat, true)}${_coord(f.lon, false)}${f.valid ? 'A' : 'V'}'
+      '${f.baroAltM == null ? '00000' : _alt(f.baroAltM)}${_alt(f.gpsAltM)}';
 }

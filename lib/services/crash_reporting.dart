@@ -22,6 +22,20 @@ Future<void> runWithCrashReporting(Future<void> Function() init, Widget Function
       o.dsn = _dsn;
       o.sendDefaultPii = false;
       o.tracesSampleRate = 0;
+      // Error texts can contain request URLs, and those carry coordinates: keep only the host.
+      o.beforeSend = (event, hint) {
+        for (final e in event.exceptions ?? const <SentryException>[]) {
+          if (e.value != null) e.value = scrubUrls(e.value!);
+        }
+        final m = event.message;
+        if (m != null) event.message = SentryMessage(scrubUrls(m.formatted), template: m.template == null ? null : scrubUrls(m.template!));
+        return event;
+      };
+      o.beforeBreadcrumb = (crumb, hint) {
+        if (crumb?.message != null) crumb!.message = scrubUrls(crumb.message!);
+        crumb?.data?.remove('url');
+        return crumb;
+      };
     },
     appRunner: () async {
       await init();
@@ -36,5 +50,10 @@ Future<void> runWithCrashReporting(Future<void> Function() init, Widget Function
 /// it as a breadcrumb so it shows up next to a later crash report.
 void logIgnored(String what, Object error) {
   debugPrint('$what failed (ignored): $error');
-  Sentry.addBreadcrumb(Breadcrumb(message: '$what failed: $error', level: SentryLevel.warning, category: 'ignored'));
+  Sentry.addBreadcrumb(Breadcrumb(message: scrubUrls('$what failed: $error'), level: SentryLevel.warning, category: 'ignored'));
 }
+
+/// Replaces every URL by its scheme and host (`https://api.open-meteo.com/…`), dropping paths and
+/// query strings, which may contain positions.
+String scrubUrls(String text) => text.replaceAllMapped(
+    RegExp('\\b(https?|wss?)://([^/\\s?#]+)[^\\s,;)\\]"\']*'), (m) => '${m[1]}://${m[2]}/…');

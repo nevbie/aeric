@@ -39,7 +39,11 @@ estimates.
   - **Glide**: current L/D, plus final glide to the nearest known landing field (needed L/D and
     arrival height including wind and a 150 m margin).
   - Voice callouts when leaving a thermal. Recording runs in the background (Android foreground
-    service, iOS background location and audio) and auto-saves after landing.
+    service, iOS background location and audio). After landing (standing still, level, near the
+    ground for 90 s) the flight is saved, but the instruments keep running until you press Stop,
+    so hovering in strong wind can never silence the vario. Every fix is also written to a
+    recovery file; if the app is killed in flight, the next start adds the flight to the logbook.
+    A recording in which no flight is detected is kept in `logbook/unanalyzed/`.
 - **Logbook** (v0.2):
   - recorded flights, plus **IGC import** (single files or the ZIP from XContest → My flights →
     Download: IGC)

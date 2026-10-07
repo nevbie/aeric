@@ -5,6 +5,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../core/flight/fix.dart';
 import '../core/flight/flight_analysis.dart';
 import '../core/flight/geo.dart';
 import '../core/flight/igc.dart';
@@ -94,26 +95,62 @@ class Logbook extends ChangeNotifier {
 
   Future<Directory> get _dir async => (await _dirFn())..createSync(recursive: true);
 
-  Future<void> load() async {
-    if (loaded) return;
-    try {
-      final f = File('${(await _dir).path}/index.json');
-      if (f.existsSync()) {
+  Future<void>? _loading;
+
+  Future<void> load() => _loading ??= _load();
+
+  Future<void> _load() async {
+    final dir = await _dir;
+    final f = File('${dir.path}/index.json');
+    if (f.existsSync()) {
+      try {
         entries
           ..clear()
           ..addAll((jsonDecode(await f.readAsString()) as List).cast<Map<String, dynamic>>().map(LogEntry.fromJson));
+      } catch (e) {
+        // Never overwrite a damaged index: keep it aside and rebuild the list from the IGC files.
+        debugPrint('logbook: damaged index ($e), rebuilding from IGC files');
+        await f.rename('${dir.path}/index.corrupt-${DateTime.now().millisecondsSinceEpoch}.json');
+        await _rebuild(dir);
       }
-    } catch (e) {
-      debugPrint('logbook: $e');
     }
     loaded = true;
     notifyListeners();
+    await _recoverRecording();
     fillMissingConditions();
   }
 
+  Future<void> _rebuild(Directory dir) async {
+    entries.clear();
+    for (final file in dir.listSync().whereType<File>()) {
+      final name = file.uri.pathSegments.last;
+      if (!name.endsWith('.igc') || name == _recordingName) continue;
+      try {
+        final stats = const FlightAnalyzer().analyze(parseIgc(await file.readAsString()).fixes);
+        if (stats != null) entries.add(_entryFrom(name.substring(0, name.length - 4), stats, 'imported'));
+      } catch (e) {
+        debugPrint('logbook: cannot read $name: $e');
+      }
+    }
+    await _save();
+  }
+
+  /// Writes the index atomically (temp file + rename), so a crash never leaves half a file.
   Future<void> _save() async {
     entries.sort((a, b) => b.takeoff.compareTo(a.takeoff));
-    await File('${(await _dir).path}/index.json').writeAsString(jsonEncode([for (final e in entries) e.toJson()]));
+    final dir = await _dir;
+    final tmp = File('${dir.path}/index.json.tmp');
+    await tmp.writeAsString(jsonEncode([for (final e in entries) e.toJson()]), flush: true);
+    await tmp.rename('${dir.path}/index.json');
+  }
+
+  /// Runs logbook changes one after another, so two saves of the same flight can't both pass
+  /// the duplicate check.
+  Future<void> _tail = Future.value();
+  Future<T> _serial<T>(Future<T> Function() fn) {
+    final result = _tail.then((_) => fn());
+    _tail = result.then((_) {}, onError: (Object _) {});
+    return result;
   }
 
   Future<String> igcPath(LogEntry e) async => '${(await _dir).path}/${e.id}.igc';
@@ -130,13 +167,26 @@ class Logbook extends ChangeNotifier {
   /// or is already in the logbook.
   Future<LogEntry?> addIgc(String text, {required String source}) async {
     await load();
-    final igc = parseIgc(text);
-    final stats = const FlightAnalyzer().analyze(igc.fixes);
+    final entry = await _serial(() => _addIgc(text, source));
+    if (entry != null) await _tagConditions(entry);
+    return entry;
+  }
+
+  Future<LogEntry?> _addIgc(String text, String source) async {
+    final stats = const FlightAnalyzer().analyze(parseIgc(text).fixes);
     if (stats == null) return null;
     final t = stats.takeoff.time;
     final id = '${t.year}${_pad2(t.month)}${_pad2(t.day)}-${_pad2(t.hour)}${_pad2(t.minute)}${_pad2(t.second)}';
     if (entries.any((e) => e.id == id)) return null;
+    final entry = _entryFrom(id, stats, source);
+    await File(await igcPath(entry)).writeAsString(text, flush: true);
+    entries.add(entry);
+    await _save();
+    notifyListeners();
+    return entry;
+  }
 
+  LogEntry _entryFrom(String id, FlightStats stats, String source) {
     String? site;
     var best = 3000.0;
     for (final s in AppState.instance.sites) {
@@ -146,9 +196,9 @@ class Logbook extends ChangeNotifier {
         site = s.name;
       }
     }
-    final entry = LogEntry(
+    return LogEntry(
       id: id,
-      takeoff: t,
+      takeoff: stats.takeoff.time,
       landing: stats.landing.time,
       siteName: site,
       lat: stats.takeoff.lat,
@@ -160,12 +210,117 @@ class Logbook extends ChangeNotifier {
       thermals: [for (final s in stats.thermals) ConditionedThermal(s, null)],
       source: source,
     );
-    await File(await igcPath(entry)).writeAsString(text);
-    entries.add(entry);
-    await _save();
+  }
+
+  /// Saves a recording in which the analysis finds no flight (e.g. a hover-only soaring flight),
+  /// so it is never thrown away. Kept as IGC in `logbook/unanalyzed/`.
+  Future<File> saveUnanalyzed(String text) async {
+    final dir = Directory('${(await _dir).path}/unanalyzed')..createSync(recursive: true);
+    final f = File('${dir.path}/${DateTime.now().toUtc().toIso8601String().replaceAll(':', '-')}.igc');
+    await f.writeAsString(text, flush: true);
+    message = 'Recording saved without a detected flight: ${f.path}';
     notifyListeners();
-    await _tagConditions(entry);
+    return f;
+  }
+
+  /// Saves a recorded flight: as a logbook entry, or as an unanalyzed IGC if no flight is found
+  /// in it. Returns the entry, if any.
+  Future<LogEntry?> saveRecording(String text) async {
+    await load();
+    final entry = await _saveRecordingLoaded(text);
+    if (entry != null) await _tagConditions(entry);
     return entry;
+  }
+
+  Future<LogEntry?> _saveRecordingLoaded(String text) async {
+    final entry = await _serial(() => _addIgc(text, 'recorded'));
+    if (entry == null && !_isDuplicate(text)) await saveUnanalyzed(text);
+    return entry;
+  }
+
+  bool _isDuplicate(String text) {
+    final stats = const FlightAnalyzer().analyze(parseIgc(text).fixes);
+    if (stats == null) return false;
+    final t = stats.takeoff.time;
+    final id = '${t.year}${_pad2(t.month)}${_pad2(t.day)}-${_pad2(t.hour)}${_pad2(t.minute)}${_pad2(t.second)}';
+    return entries.any((e) => e.id == id);
+  }
+
+  // ------------------------------------------------------------------ crash recovery
+  // While recording, every fix is appended to `recording.igc`. If the app is killed in flight,
+  // the next start turns that file into a logbook entry.
+
+  static const _recordingName = 'recording.igc';
+  RandomAccessFile? _rec;
+  final _recBuffer = StringBuffer();
+  DateTime? _recFlushedAt;
+  bool _recWanted = false;
+
+  /// Starts a new recovery file (after recovering a leftover one from a crash).
+  Future<void> startRecording({String pilot = '', String glider = ''}) async {
+    _recWanted = true; // fixes arriving meanwhile are buffered
+    await load();
+    await _closeRecording();
+    if (!_recWanted) return; // stopped while we were waiting
+    final f = File('${(await _dir).path}/$_recordingName');
+    _rec = f.openSync(mode: FileMode.write)..writeStringSync(igcHeader(DateTime.now(), pilot: pilot, glider: glider));
+    _flushRecording();
+  }
+
+  /// Appends a fix; written to disk at least every 5 s.
+  void appendFix(Fix f) {
+    if (!_recWanted) return;
+    _recBuffer.writeln(igcBRecord(f));
+    final last = _recFlushedAt;
+    if (last == null || f.time.difference(last).inSeconds.abs() >= 5) {
+      _recFlushedAt = f.time;
+      _flushRecording();
+    }
+  }
+
+  void _flushRecording() {
+    final r = _rec;
+    if (r == null || _recBuffer.isEmpty) return;
+    try {
+      r
+        ..writeStringSync(_recBuffer.toString())
+        ..flushSync();
+      _recBuffer.clear();
+    } catch (e) {
+      debugPrint('logbook: recovery write failed: $e');
+    }
+  }
+
+  /// The flight was saved normally: the recovery file is no longer needed.
+  Future<void> finishRecording() async {
+    _recWanted = false;
+    _recBuffer.clear();
+    await _closeRecording();
+    final f = File('${(await _dir).path}/$_recordingName');
+    if (f.existsSync()) await f.delete();
+  }
+
+  Future<void> _closeRecording() async {
+    final r = _rec;
+    _rec = null;
+    _recFlushedAt = null;
+    if (r != null) await r.close();
+  }
+
+  /// Turns a recovery file left by a crash into a logbook entry. Runs once, while loading.
+  Future<void> _recoverRecording() async {
+    if (_rec != null) return; // the file belongs to the flight in progress
+    final f = File('${(await _dir).path}/$_recordingName');
+    if (!f.existsSync()) return;
+    try {
+      final igc = parseIgc(await f.readAsString());
+      if (igc.fixes.length > 30) {
+        await _saveRecordingLoaded(writeIgc(igc.fixes, pilot: igc.pilot ?? '', glider: igc.glider ?? ''));
+      }
+      await f.delete();
+    } catch (e) {
+      debugPrint('logbook: recovery failed: $e');
+    }
   }
 
   /// Tags each thermal of [e] with the weather of its hour (ERA5 archive, or the forecast API's

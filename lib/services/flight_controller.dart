@@ -15,6 +15,7 @@ import '../core/flight/flight_analysis.dart';
 import '../core/flight/geo.dart';
 import '../core/flight/glide.dart';
 import '../core/flight/igc.dart';
+import '../core/flight/landing_detector.dart';
 import '../core/flight/thermal_assistant.dart';
 import '../core/flight/vario.dart';
 import '../core/flight/wind.dart';
@@ -22,6 +23,7 @@ import '../core/landing.dart';
 import '../core/task/task.dart';
 import '../core/devices/vario_protocols.dart';
 import 'airspace_store.dart';
+import 'crash_reporting.dart';
 import 'app_state.dart';
 import 'ble_vario.dart';
 import 'logbook.dart';
@@ -88,7 +90,13 @@ class FlightController extends ChangeNotifier {
   final _gpsKalman = KalmanVario(accelNoise: 0.4, altNoiseM: 4);
   final _avg = TimeAverage(const Duration(seconds: 30));
   double? _qnh;
-  final List<(DateTime, double)> _qnhSamples = [];
+
+  /// Latest pressure before the barometer is calibrated.
+  double? _uncalibratedHpa;
+
+  /// Whether the last pressure came from a Bluetooth vario (to keep the altitude continuous when
+  /// switching between it and the phone barometer, which read a few hPa apart).
+  bool? _lastPressureExternal;
   StreamSubscription<Position>? _gpsSub;
   StreamSubscription<BarometerEvent>? _baroSub;
   StreamSubscription<VarioSample>? _bleSub;
@@ -103,9 +111,13 @@ class FlightController extends ChangeNotifier {
   }
   Timer? _replayTimer;
   DateTime? _lastElevationAt;
-  DateTime? _groundSince;
   int _circlingFixes = 0;
   Fix? _thermalStart;
+  final _landing = LandingDetector();
+
+  /// Index into [track] where the current flight starts (after an earlier landing it moves on).
+  int _segmentStart = 0;
+  bool _stopping = false;
 
   ElevationClient get _elevation => AppState.instance.elevation;
 
@@ -174,6 +186,8 @@ class FlightController extends ChangeNotifier {
       cancelOnError: true,
     );
     _bleSub = BleVario.instance.samples.listen(onExternal);
+    final st = Settings.instance;
+    Logbook.instance.startRecording(pilot: st.pilot, glider: st.glider).catchError((Object e) => logIgnored('recovery file', e));
     BleVario.instance.reconnect().ignore();
     _applyAudioSettings();
     await audio.start(() => varioMs);
@@ -201,22 +215,46 @@ class FlightController extends ChangeNotifier {
   }
 
   Future<void> stop() async {
-    await _gpsSub?.cancel();
-    await _baroSub?.cancel();
-    await _bleSub?.cancel();
-    _bleSub = null;
-    _gpsSub = null;
-    _baroSub = null;
-    _replayTimer?.cancel();
-    _replayTimer = null;
-    await audio.stop();
-    WakelockPlus.disable().ignore();
+    // Only one stop at a time; mode changes first so nothing else saves the same flight.
+    if (_stopping || mode == FlightMode.idle) return;
+    _stopping = true;
     final wasLive = mode == FlightMode.live;
     mode = FlightMode.idle;
-    notifyListeners();
-    if (wasLive && track.length > 30) {
-      final st = Settings.instance;
-      await Logbook.instance.addIgc(writeIgc(track, pilot: st.pilot, glider: st.glider), source: 'recorded');
+    try {
+      _replayTimer?.cancel();
+      _replayTimer = null;
+      await _gpsSub?.cancel();
+      await _baroSub?.cancel();
+      await _bleSub?.cancel();
+      _bleSub = null;
+      _gpsSub = null;
+      _baroSub = null;
+      await audio.stop();
+      WakelockPlus.disable().ignore();
+      notifyListeners();
+      if (wasLive) {
+        // Save the flight in progress (one that already landed was saved then).
+        if (track.length - _segmentStart > 30) await _saveSegment();
+        await Logbook.instance.finishRecording();
+      }
+    } finally {
+      _stopping = false;
+    }
+  }
+
+  /// Saves the current segment (since the start or the last landing). If takeoff was detected
+  /// live, the recording is kept even when the analysis finds no flight in it.
+  Future<void> _saveSegment() async {
+    final st = Settings.instance;
+    final fixes = track.sublist(_segmentStart);
+    final tookOff = takeoffTime != null;
+    _segmentStart = track.length;
+    takeoffTime = null;
+    final igc = writeIgc(fixes, pilot: st.pilot, glider: st.glider);
+    if (tookOff) {
+      await Logbook.instance.saveRecording(igc);
+    } else {
+      await Logbook.instance.addIgc(igc, source: 'recorded');
     }
   }
 
@@ -252,7 +290,9 @@ class FlightController extends ChangeNotifier {
     _gpsKalman.reset();
     _avg.clear();
     _qnh = null;
-    _qnhSamples.clear();
+    _uncalibratedHpa = null;
+    _lastPressureExternal = null;
+    baroAltM = null;
     track.clear();
     fix = null;
     wind = null;
@@ -265,9 +305,10 @@ class FlightController extends ChangeNotifier {
     flying = false;
     takeoffTime = null;
     hasBarometer = false;
-    _groundSince = null;
     _circlingFixes = 0;
     _thermalStart = null;
+    _landing.reset();
+    _segmentStart = 0;
     thermalAvgMs = null;
     thermalGainM = null;
     airspaceWarnings = const [];
@@ -291,19 +332,25 @@ class FlightController extends ChangeNotifier {
     }
     hasBarometer = true;
     if (_qnh == null) {
-      _qnhSamples.add((t, hPa));
+      _uncalibratedHpa = hPa;
+      _lastPressureExternal = external;
       return;
     }
+    if (_lastPressureExternal != null && _lastPressureExternal != external && baroAltM != null) {
+      // Switched sensor: recalibrate so the altitude carries on instead of jumping.
+      _qnh = qnhFor(hPa, baroAltM!);
+    }
+    _lastPressureExternal = external;
     baroAltM = pressureToAltitudeM(hPa, qnhHpa: _qnh!);
     varioMs = _kalman.update(t, baroAltM!);
   }
 
   void onPosition(Fix raw, {double? speedKmh}) {
     // Calibrate the barometer once GPS altitude has settled (10 fixes), or right away in replay.
-    if (_qnh == null && hasBarometer && _qnhSamples.isNotEmpty && (track.length >= 10 || mode == FlightMode.replay)) {
-      final p = _qnhSamples.last.$2;
+    if (_qnh == null && hasBarometer && _uncalibratedHpa != null && (track.length >= 10 || mode == FlightMode.replay)) {
+      final p = _uncalibratedHpa!;
       _qnh = mode == FlightMode.replay ? 1013.25 : (Settings.instance.qnhHpa ?? qnhFor(p, _calibrationAltitude(raw)));
-      _qnhSamples.clear();
+      _uncalibratedHpa = null;
     }
     final f = Fix(time: raw.time, lat: raw.lat, lon: raw.lon, gpsAltM: raw.gpsAltM, baroAltM: hasBarometer ? baroAltM : null);
     final prev = fix;
@@ -315,7 +362,10 @@ class FlightController extends ChangeNotifier {
       groundSpeedKmh = speedKmh ?? FlightAnalyzer.speedKmh(prev, f);
       if (distanceM(prev.lat, prev.lon, f.lat, f.lon) > 1) trackDeg = bearingDeg(prev.lat, prev.lon, f.lat, f.lon);
     }
-    if (track.isEmpty || f.time.difference(track.last.time).inMilliseconds >= 900) track.add(f);
+    if (track.isEmpty || f.time.difference(track.last.time).inMilliseconds >= 900) {
+      track.add(f);
+      if (mode == FlightMode.live) Logbook.instance.appendFix(f);
+    }
 
     _updateFlying(f);
     _updateThermal(f);
@@ -360,7 +410,7 @@ class FlightController extends ChangeNotifier {
       lat: f.lat,
       lon: f.lon,
       altM: f.altM,
-      groundM: terrainM ?? 0,
+      groundM: terrainM,
       qnhHpa: _qnh ?? Settings.instance.qnhHpa ?? 1013.25,
       trackDeg: trackDeg,
       groundSpeedKmh: groundSpeedKmh,
@@ -386,24 +436,26 @@ class FlightController extends ChangeNotifier {
 
   void _updateFlying(Fix f) {
     // Takeoff: moving faster than walking for the last 15 s.
-    if (!flying && groundSpeedKmh > 15 && track.length > 15) {
+    if (!flying && groundSpeedKmh > 15 && track.length - _segmentStart > 15) {
       final recent = track.sublist(track.length - 15);
       if (FlightAnalyzer.speedKmh(recent.first, recent.last) > 12) {
         flying = true;
         takeoffTime = f.time;
+        _landing.reset();
       }
     }
-    if (flying) {
-      if (groundSpeedKmh < 3) {
-        _groundSince ??= f.time;
-        if (f.time.difference(_groundSince!).inSeconds > 90 && mode == FlightMode.live) {
-          flying = false;
-          _say('Landed. Flight saved.');
-          stop();
-        }
-      } else {
-        _groundSince = null;
-      }
+    if (!flying) return;
+    // Landing saves the flight, but never stops the instruments: a false landing (hovering in
+    // strong wind) must not silence the vario. The pilot ends the recording with Stop.
+    final landed = _landing.update(time: f.time, groundSpeedKmh: groundSpeedKmh, varioMs: varioMs, altM: f.altM, aglM: aglM);
+    if (landed && mode == FlightMode.live) {
+      flying = false;
+      _landing.reset();
+      _say('Landed. Flight saved.');
+      final st = Settings.instance;
+      _saveSegment()
+          .then((_) => mode == FlightMode.live ? Logbook.instance.startRecording(pilot: st.pilot, glider: st.glider) : null)
+          .catchError((Object e) => logIgnored('saving landed flight', e));
     }
   }
 

@@ -26,14 +26,21 @@ class AltitudeLimit {
 
   /// Parses OpenAIR limits: GND, SFC, UNL, FL95, FL 95, 2500ft MSL, 2500 ft, 1500ft AGL,
   /// 1500 GND, 1000m, 1000 m AMSL, 4500 ALT.
-  static AltitudeLimit parse(String raw) {
+  ///
+  /// A limit that can't be read errs on the safe side: as a floor it becomes the ground, as a
+  /// [ceiling] unlimited, so the airspace is never silently ignored.
+  static AltitudeLimit parse(String raw, {bool ceiling = false}) {
     final s = raw.trim().toUpperCase();
-    if (s.isEmpty || s == 'GND' || s == 'SFC' || s == '0' || s.startsWith('GND ') || s == 'GROUND') return AltitudeLimit(0, AltitudeRef.agl, text: raw.trim());
+    final unreadable = ceiling
+        ? AltitudeLimit(0, AltitudeRef.unlimited, text: raw.trim())
+        : AltitudeLimit(0, AltitudeRef.agl, text: raw.trim());
+    if (s.isEmpty) return unreadable;
+    if (s == 'GND' || s == 'SFC' || s == '0' || s.startsWith('GND ') || s == 'GROUND') return AltitudeLimit(0, AltitudeRef.agl, text: raw.trim());
     if (s.startsWith('UNL') || s == 'UNLIMITED') return AltitudeLimit(0, AltitudeRef.unlimited, text: raw.trim());
     final fl = RegExp(r'^FL\s*(\d+)').firstMatch(s);
     if (fl != null) return AltitudeLimit(double.parse(fl.group(1)!), AltitudeRef.fl, text: raw.trim());
     final m = RegExp(r'^(\d+(?:\.\d+)?)\s*(FT|F|M)?\s*(.*)$').firstMatch(s);
-    if (m == null) return AltitudeLimit(0, AltitudeRef.agl, text: raw.trim());
+    if (m == null) return unreadable;
     var v = double.parse(m.group(1)!);
     if (m.group(2) != 'M') v *= 0.3048; // feet by default
     final rest = m.group(3) ?? '';
@@ -167,7 +174,7 @@ List<Airspace> parseOpenAir(String text) {
       case 'AL':
         floor = AltitudeLimit.parse(arg);
       case 'AH':
-        ceiling = AltitudeLimit.parse(arg);
+        ceiling = AltitudeLimit.parse(arg, ceiling: true);
       case 'DP':
         final p = parseOpenAirPoint(arg);
         if (p != null) points.add(p);
@@ -255,7 +262,7 @@ class AirspaceChecker {
     required double lat,
     required double lon,
     required double altM,
-    double groundM = 0,
+    double? groundM,
     double qnhHpa = 1013.25,
     double? trackDeg,
     double groundSpeedKmh = 0,
@@ -266,8 +273,12 @@ class AirspaceChecker {
     final out = <AirspaceWarning>[];
     for (final a in airspaces) {
       if (ignoredClasses.contains(a.cls)) continue;
-      final lo = a.floor.toMslM(groundM: groundM, qnhHpa: qnhHpa);
-      final hi = a.ceiling.toMslM(groundM: groundM, qnhHpa: qnhHpa);
+      // Terrain height unknown: assume sea level for floors (lower) and no limit for ceilings
+      // given above ground, so warnings err on the safe side.
+      final lo = a.floor.toMslM(groundM: groundM ?? 0, qnhHpa: qnhHpa);
+      final hi = groundM == null && a.ceiling.ref == AltitudeRef.agl
+          ? double.infinity
+          : a.ceiling.toMslM(groundM: groundM ?? 0, qnhHpa: qnhHpa);
       final vertical = altM < lo ? lo - altM : (altM > hi ? altM - hi : 0.0);
       if (vertical > verticalWarnM) continue;
       // Quick reject far away airspaces.
