@@ -56,4 +56,4 @@ void logIgnored(String what, Object error) {
 /// Replaces every URL by its scheme and host (`https://api.open-meteo.com/…`), dropping paths and
 /// query strings, which may contain positions.
 String scrubUrls(String text) => text.replaceAllMapped(
-    RegExp('\\b(https?|wss?)://([^/\\s?#]+)[^\\s,;)\\]"\']*'), (m) => '${m[1]}://${m[2]}/…');
+    RegExp('\\b(https?|wss?)://([^/\\s?#]+)[^\\s<>)\\]"\']*'), (m) => '${m[1]}://${m[2]}/…');

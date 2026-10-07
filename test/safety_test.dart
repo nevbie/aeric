@@ -161,6 +161,8 @@ void main() {
       scrubUrls('ClientException: Connection reset, uri=https://api.open-meteo.com/v1/forecast?latitude=48.76&longitude=8.27'),
       'ClientException: Connection reset, uri=https://api.open-meteo.com/…',
     );
+    expect(scrubUrls('GET https://api.open-meteo.com/v1/forecast?latitude=48.7,48.8&longitude=8.2,8.3 failed'),
+        'GET https://api.open-meteo.com/… failed');
     expect(scrubUrls('no url here'), 'no url here');
   });
 }
