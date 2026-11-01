@@ -14,7 +14,7 @@ dependencies:
   http: ^1.2.2
   shared_preferences: ^2.3.5
   path_provider: ^2.1.5
-  geolocator: ^14.1.1
+  geolocator: ^14.1.2
   sensors_plus: ^7.1.1
   flutter_pcm_sound: ^3.3.3
   wakelock_plus: ">=1.2.10 <1.8.1"
